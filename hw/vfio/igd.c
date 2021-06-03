@@ -14,6 +14,7 @@
 #include "qemu/units.h"
 #include "qapi/error.h"
 #include "hw/hw.h"
+#include "hw/i386/ich9.h"
 #include "hw/nvram/fw_cfg.h"
 #include "pci.h"
 #include "trace.h"
@@ -220,19 +221,18 @@ static int vfio_pci_igd_lpc_init(VFIOPCIDevice *vdev,
                                  struct vfio_region_info *info)
 {
     PCIDevice *lpc_bridge;
-    int ret;
+    int ret = 0;
 
     lpc_bridge = pci_find_device(pci_device_root_bus(&vdev->pdev),
                                  0, PCI_DEVFN(0x1f, 0));
     if (!lpc_bridge) {
         lpc_bridge = pci_create_simple(pci_device_root_bus(&vdev->pdev),
                                  PCI_DEVFN(0x1f, 0), "vfio-pci-igd-lpc-bridge");
-    }
-
-    ret = vfio_pci_igd_copy(vdev, lpc_bridge, info, igd_lpc_bridge_infos,
-                            ARRAY_SIZE(igd_lpc_bridge_infos));
-    if (!ret) {
-        trace_vfio_pci_igd_lpc_bridge_enabled(vdev->vbasedev.name);
+        ret = vfio_pci_igd_copy(vdev, lpc_bridge, info, igd_lpc_bridge_infos,
+                                ARRAY_SIZE(igd_lpc_bridge_infos));
+        if (!ret) {
+            trace_vfio_pci_igd_lpc_bridge_enabled(vdev->vbasedev.name);
+        }
     }
 
     return ret;
@@ -397,7 +397,9 @@ void vfio_probe_igd_bar4_quirk(VFIOPCIDevice *vdev, int nr)
     lpc_bridge = pci_find_device(pci_device_root_bus(&vdev->pdev),
                                  0, PCI_DEVFN(0x1f, 0));
     if (lpc_bridge && !object_dynamic_cast(OBJECT(lpc_bridge),
-                                           "vfio-pci-igd-lpc-bridge")) {
+                                           "vfio-pci-igd-lpc-bridge") &&
+        strcmp(object_class_get_name(object_get_class(OBJECT(lpc_bridge))),
+                                     TYPE_ICH9_LPC_DEVICE)) {
         error_report("IGD device %s cannot support legacy mode due to existing "
                      "devices at address 1f.0", vdev->vbasedev.name);
         return;
