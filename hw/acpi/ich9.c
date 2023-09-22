@@ -90,6 +90,7 @@ static void ich9_smi_writel(void *opaque, hwaddr addr, uint64_t val,
     ICH9LPCPMRegs *pm = opaque;
     TCOIORegs *tr = &pm->tco_regs;
     uint64_t tco_en;
+    uint32_t mask;
 
     switch (addr) {
     case 0:
@@ -113,6 +114,10 @@ static void ich9_smi_writel(void *opaque, hwaddr addr, uint64_t val,
         pm->smi_sts &= ~pm->smi_sts_wmask;
         pm->smi_sts |= (val & pm->smi_sts_wmask);
         break;
+    case 4:
+        mask = pm->smi_sts & ~val;
+        pm->smi_sts &= ~(ICH9_PMIO_SMI_STS_TCO | ICH9_PMIO_SMI_STS_APMC);
+        pm->smi_sts |= mask & (ICH9_PMIO_SMI_STS_TCO | ICH9_PMIO_SMI_STS_APMC);
     }
 }
 
