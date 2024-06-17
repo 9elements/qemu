@@ -351,6 +351,12 @@ usb_serial_set_data(int bus, int addr, int parity, int data, int stop) "dev %d:%
 usb_serial_set_flow_control(int bus, int addr, int index) "dev %d:%u flow control %d"
 usb_serial_set_xonxoff(int bus, int addr, uint8_t xon, uint8_t xoff) "dev %d:%u xon 0x%x xoff 0x%x"
 
+# dev-video.c
+
+usb_video_handle_control(int bus, int addr, int request, int value, int index, int length) "dev %d:%u got control 0x%x, value 0x%x index 0x%04x length 0x%04x"
+usb_video_handle_uvc_control(int bus, int addr, uint8_t req, uint8_t intfnum, uint8_t unit, uint8_t cs) "dev %d:%u uvc control query %d, iface %d, unit %d, cs %d"
+usb_video_unsupported_control(int bus, int addr, int request, int value, int ret) "dev %d:%u got unsupported/bogus control 0x%x, value 0x%x, retval %d"
+
 # canokey.c
 canokey_emu_stall_ep(uint8_t ep) "ep %d"
 canokey_emu_set_address(uint8_t addr) "addr %d"
