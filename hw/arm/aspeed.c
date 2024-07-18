@@ -999,6 +999,24 @@ static void fby35_i2c_init(AspeedMachineState *bmc)
     at24c_eeprom_init_rom(i2c[11], 0x54, 128 * KiB, fby35_bmc_fruid,
                           fby35_bmc_fruid_len);
 
+    /* Sentinel Dome EEPROMS */
+    at24c_eeprom_init_rom(i2c[1], 0x51, 128 * KiB, fby35_sentinel_dome_fruid,
+                          fby35_sentinel_dome_fruid_len);
+    at24c_eeprom_init_rom(i2c[2], 0x51, 128 * KiB, fby35_sentinel_dome_fruid,
+                          fby35_sentinel_dome_fruid_len);
+    at24c_eeprom_init_rom(i2c[3], 0x51, 128 * KiB, fby35_sentinel_dome_fruid,
+                          fby35_sentinel_dome_fruid_len);
+    at24c_eeprom_init_rom(i2c[4], 0x51, 128 * KiB, fby35_sentinel_dome_fruid,
+                          fby35_sentinel_dome_fruid_len);
+    at24c_eeprom_init_rom(i2c[5], 0x51, 128 * KiB, fby35_sentinel_dome_fruid,
+                          fby35_sentinel_dome_fruid_len);
+    at24c_eeprom_init_rom(i2c[6], 0x51, 128 * KiB, fby35_sentinel_dome_fruid,
+                          fby35_sentinel_dome_fruid_len);
+    at24c_eeprom_init_rom(i2c[7], 0x51, 128 * KiB, fby35_sentinel_dome_fruid,
+                          fby35_sentinel_dome_fruid_len);
+    at24c_eeprom_init_rom(i2c[8], 0x51, 128 * KiB, fby35_sentinel_dome_fruid,
+                          fby35_sentinel_dome_fruid_len);
+
     /*
      * TODO: There is a multi-master i2c connection to an AST1030 MiniBMC on
      * buses 0, 1, 2, 3, and 9. Source address 0x10, target address 0x20 on
