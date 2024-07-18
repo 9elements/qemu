@@ -1300,6 +1300,50 @@ static void fby35_i2c_init(AspeedMachineState *bmc)
     at24c_eeprom_init_rom(i2c[11], 0x54, 128 * KiB, fby35_bmc_fruid,
                           fby35_bmc_fruid_len);
 
+    /* Sentinel Dome Board EEPROMS */
+    const uint8_t enclosure_addr = 0x51;
+    const uint8_t board_addr = 0x54;
+    const uint8_t chassis_addr = 0x55;
+
+    // Enclosure
+    at24c_eeprom_init_rom(i2c[1], enclosure_addr, 128 * KiB, fby4_sentinel_dome_enclosure_fruid,
+                          fby4_sentinel_dome_enclosure_fruid_len);
+
+
+    // Board
+    at24c_eeprom_init_rom(i2c[1], board_addr, 128 * KiB, fby4_sentinel_dome_board_fruid,
+                          fby4_sentinel_dome_board_fruid_len);
+    at24c_eeprom_init_rom(i2c[2], board_addr, 128 * KiB, fby4_sentinel_dome_board_fruid,
+                          fby4_sentinel_dome_board_fruid_len);
+    at24c_eeprom_init_rom(i2c[3], board_addr, 128 * KiB, fby4_sentinel_dome_board_fruid,
+                          fby4_sentinel_dome_board_fruid_len);
+    at24c_eeprom_init_rom(i2c[4], board_addr, 128 * KiB, fby4_sentinel_dome_board_fruid,
+                          fby4_sentinel_dome_board_fruid_len);
+    at24c_eeprom_init_rom(i2c[5], board_addr, 128 * KiB, fby4_sentinel_dome_board_fruid,
+                          fby4_sentinel_dome_board_fruid_len);
+    at24c_eeprom_init_rom(i2c[6], board_addr, 128 * KiB, fby4_sentinel_dome_board_fruid,
+                          fby4_sentinel_dome_board_fruid_len);
+    at24c_eeprom_init_rom(i2c[7], board_addr, 128 * KiB, fby4_sentinel_dome_board_fruid,
+                          fby4_sentinel_dome_board_fruid_len);
+    at24c_eeprom_init_rom(i2c[8], board_addr, 128 * KiB, fby4_sentinel_dome_board_fruid,
+                          fby4_sentinel_dome_board_fruid_len);
+    // Chassis
+    at24c_eeprom_init_rom(i2c[1], chassis_addr, 128 * KiB, fby4_sentinel_dome_chassis_fruid,
+                          fby4_sentinel_dome_chassis_fruid_len);
+    at24c_eeprom_init_rom(i2c[2], chassis_addr, 128 * KiB, fby4_sentinel_dome_chassis_fruid,
+                          fby4_sentinel_dome_chassis_fruid_len);
+    at24c_eeprom_init_rom(i2c[3], chassis_addr, 128 * KiB, fby4_sentinel_dome_chassis_fruid,
+                          fby4_sentinel_dome_chassis_fruid_len);
+    at24c_eeprom_init_rom(i2c[4], chassis_addr, 128 * KiB, fby4_sentinel_dome_chassis_fruid,
+                          fby4_sentinel_dome_chassis_fruid_len);
+    at24c_eeprom_init_rom(i2c[5], chassis_addr, 128 * KiB, fby4_sentinel_dome_chassis_fruid,
+                          fby4_sentinel_dome_chassis_fruid_len);
+    at24c_eeprom_init_rom(i2c[6], chassis_addr, 128 * KiB, fby4_sentinel_dome_chassis_fruid,
+                          fby4_sentinel_dome_chassis_fruid_len);
+    at24c_eeprom_init_rom(i2c[7], chassis_addr, 128 * KiB, fby4_sentinel_dome_chassis_fruid,
+                          fby4_sentinel_dome_chassis_fruid_len);
+    at24c_eeprom_init_rom(i2c[8], chassis_addr, 128 * KiB, fby4_sentinel_dome_chassis_fruid,
+                          fby4_sentinel_dome_chassis_fruid_len);
     /*
      * TODO: There is a multi-master i2c connection to an AST1030 MiniBMC on
      * buses 0, 1, 2, 3, and 9. Source address 0x10, target address 0x20 on
