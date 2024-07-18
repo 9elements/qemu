@@ -15,11 +15,11 @@ extern const size_t tiogapass_bmc_fruid_len;
 extern const uint8_t fby35_nic_fruid[];
 extern const uint8_t fby35_bb_fruid[];
 extern const uint8_t fby35_sentinel_dome_fruid[];
-extern const uint8_t fby35_sentinel_dome_fruid_len;
 extern const uint8_t fby35_bmc_fruid[];
 extern const size_t fby35_nic_fruid_len;
 extern const size_t fby35_bb_fruid_len;
 extern const size_t fby35_bmc_fruid_len;
+extern const size_t fby35_sentinel_dome_fruid_len;
 
 extern const uint8_t yosemitev2_bmc_fruid[];
 extern const size_t yosemitev2_bmc_fruid_len;
