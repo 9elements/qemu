@@ -6,20 +6,7 @@
 #include "qemu/qemu-print.h"
 #include "video/video.h"
 
-static const TypeInfo video_type_info = {
-    .name = TYPE_VIDEODEV,
-    .parent = TYPE_OBJECT,
-    .instance_size = sizeof(Videodev),
-    .abstract = true,
-    .class_size = sizeof(VideodevClass),
-};
-
-static void register_types(void)
-{
-    type_register_static(&video_type_info);
-}
-
-type_init(register_types);
+static QLIST_HEAD(, Videodev) videodevs;
 
 typedef struct VideodevClassFE {
     void (*fn)(const char *name, void *opaque);
@@ -78,6 +65,36 @@ static const VideodevClass *videodev_get_class(const char *backend, Error **errp
     return vc;
 }
 
+char *qemu_videodev_get_id(Videodev *vd)
+{
+    return vd->id;
+}
+
+Videodev *qemu_videodev_by_id(char *id, Error **errp)
+{
+    Videodev *vd;
+
+    QLIST_FOREACH(vd, &videodevs, list) {
+        if (strcmp(id, vd->id) == 0) {
+            return vd;
+        }
+    }
+
+    error_setg(errp, "videodev '%s' not found", id);
+
+    return NULL;
+}
+
+void qemu_videodev_register(Videodev *vd, Error **errp)
+{
+    if (vd->registered) {
+        error_setg(errp, "videodev '%s' already in use", vd->id);
+        return;
+    }
+
+    vd->registered = true;
+}
+
 Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp) {
     Error *local_err = NULL;
     Object *obj;
@@ -114,6 +131,8 @@ Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp) {
     obj = object_new(object_class_get_name(OBJECT_CLASS(vc)));
     vd = VIDEODEV(obj);
 
+    vd->id = g_strdup(id);
+
     if (vc->parse) {
         vc->parse(vd, opts, &local_err);
     }
@@ -128,9 +147,33 @@ Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp) {
         goto error;
     }
 
+    QLIST_INSERT_HEAD(&videodevs, vd, list);
+
     return vd;
 
 error:
     error_propagate(errp, local_err);
     return NULL;
 }
+
+static void video_instance_init(Object *obj) {
+    Videodev *vd = VIDEODEV(obj);
+
+    vd->registered = false;
+}
+
+static const TypeInfo video_type_info = {
+    .name = TYPE_VIDEODEV,
+    .parent = TYPE_OBJECT,
+    .instance_init = video_instance_init,
+    .instance_size = sizeof(Videodev),
+    .abstract = true,
+    .class_size = sizeof(VideodevClass),
+};
+
+static void register_types(void)
+{
+    type_register_static(&video_type_info);
+}
+
+type_init(register_types);
