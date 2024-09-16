@@ -141,3 +141,8 @@ config USB_DWC3
 config XLNX_USB_SUBSYS
     bool
     select USB_DWC3
+
+config USB_VIDEO
+    bool
+    default y
+    depends on USB
