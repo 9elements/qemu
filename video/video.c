@@ -147,6 +147,13 @@ Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp) {
         goto error;
     }
 
+    if (vc->enum_modes) {
+        vc->enum_modes(vd, &local_err);
+    }
+    if (local_err) {
+        goto error;
+    }
+
     QLIST_INSERT_HEAD(&videodevs, vd, list);
 
     return vd;

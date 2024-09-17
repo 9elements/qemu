@@ -78,12 +78,79 @@ error:
     g_free(vv);
 }
 
+static void video_v4l2_enum_modes(Videodev *vd, Error **errp)
+{
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    VideoMode *mode;
+    VideoFramesize *frmsz;
+    VideoFramerate *frmival;
+    struct v4l2_fmtdesc v4l2_fmt;
+    struct v4l2_frmsizeenum v4l2_frmsz;
+    struct v4l2_frmivalenum v4l2_frmival;
+
+    v4l2_fmt.type = V4L2_CAP_VIDEO_CAPTURE;
+
+    for (v4l2_fmt.index = 0; ioctl(vv->fd, VIDIOC_ENUM_FMT, &v4l2_fmt) == 0; v4l2_fmt.index++) {
+        if (!qemu_video_pixfmt_supported(v4l2_fmt.pixelformat)) {
+            continue;
+        }
+
+        vd->nmode++;
+        vd->modes = g_realloc(vd->modes, vd->nmode * sizeof(VideoMode));
+
+        mode = &vd->modes[vd->nmode - 1];
+        mode->pixelformat = v4l2_fmt.pixelformat;
+        mode->framesizes = NULL;
+        mode->nframesize = 0;
+
+        v4l2_frmsz.pixel_format = v4l2_fmt.pixelformat;
+        for (v4l2_frmsz.index = 0; ioctl(vv->fd, VIDIOC_ENUM_FRAMESIZES, &v4l2_frmsz) == 0; v4l2_frmsz.index++) {
+            /* TODO: stepwise support stepwise framesizes*/
+            if (v4l2_frmsz.type != V4L2_FRMSIZE_TYPE_DISCRETE) {
+                continue;
+            }
+
+            mode->nframesize++;
+            mode->framesizes = g_realloc(mode->framesizes, mode->nframesize * sizeof(VideoFramesize));
+
+            frmsz = &mode->framesizes[mode->nframesize - 1];
+            frmsz->width = v4l2_frmsz.discrete.width;
+            frmsz->height = v4l2_frmsz.discrete.height;
+            frmsz->framerates = NULL;
+            frmsz->nframerate = 0;
+
+            v4l2_frmival.pixel_format = mode->pixelformat;
+            v4l2_frmival.width = frmsz->width;
+            v4l2_frmival.height = frmsz->height;
+
+            for (v4l2_frmival.index = 0; ioctl(vv->fd, VIDIOC_ENUM_FRAMEINTERVALS, &v4l2_frmival) == 0; v4l2_frmival.index++) {
+                frmsz->nframerate++;
+                frmsz->framerates = g_realloc(frmsz->framerates, frmsz->nframerate * sizeof(VideoFramerate));
+
+                frmival = &frmsz->framerates[frmsz->nframerate - 1];
+                frmival->numerator = v4l2_frmival.discrete.numerator;
+                frmival->denominator = v4l2_frmival.discrete.denominator;
+            }
+            if (errno != EINVAL) {
+                error_setg_errno(errp, errno, "VIDIOC_ENUM_FRAMEINTERVALS");
+            }
+        }
+        if (errno != EINVAL) {
+            error_setg_errno(errp, errno, "VIDIOC_ENUM_FRAMESIZES");
+        }
+    }
+    if (errno != EINVAL) {
+        error_setg_errno(errp, errno, "VIDIOC_ENUM_FMT");
+    }
+}
+
 static void video_v4l2_class_init(ObjectClass *oc, void *data)
 {
     VideodevClass *vc = VIDEODEV_CLASS(oc);
 
     vc->parse = video_v4l2_parse;
     vc->open = video_v4l2_open;
+    vc->enum_modes = video_v4l2_enum_modes;
 }
 
 static const TypeInfo video_v4l2_type_info = {
