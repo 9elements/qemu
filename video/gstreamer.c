@@ -4,12 +4,16 @@
 #include "qemu/option.h"
 #include "video/video.h"
 
+#include <gst/gst.h>
+
 #define TYPE_VIDEODEV_GSTREAMER TYPE_VIDEODEV"-gstreamer"
 
 struct GStreamerVideodev {
     Videodev parent;
 
-    char* pipeline;
+    GstElement *pipeline;
+    GstElement *src;
+    GstElement *sink;
 };
 typedef struct GStreamerVideodev GStreamerVideodev;
 
@@ -17,13 +21,188 @@ DECLARE_INSTANCE_CHECKER(GStreamerVideodev, GSTREAMER_VIDEODEV, TYPE_VIDEODEV_GS
 
 static void video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
 {
-    GStreamerVideodev *vv = GSTREAMER_VIDEODEV(vd);
-    const char *pipeline = qemu_opt_get(opts, "pipeline");
-    if (pipeline == NULL) {
+    GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
+    const char *pipeline_desc = qemu_opt_get(opts, "pipeline");
+    GstPad *src_pad;
+
+    if (pipeline_desc == NULL) {
         error_setg(errp, QERR_MISSING_PARAMETER, "pipeline");
+        return;
     }
 
-    vv->pipeline = g_strdup(pipeline);
+    if (!gst_is_initialized())
+        gst_init(NULL, NULL);
+
+    GError *error = NULL;
+    gv->pipeline = gst_parse_bin_from_description(pipeline_desc, false, &error);
+    if (error) {
+        error_setg(errp, "unable to parse pipeline: %s", error->message);
+        return;
+    }
+
+    src_pad = gst_bin_find_unlinked_pad(GST_BIN(gv->pipeline), GST_PAD_SRC);
+    if (!src_pad) {
+        error_setg(errp, "pipeline has no unlinked src pad");
+        return;
+    }
+
+    gv->src = gst_pad_get_parent_element(src_pad);
+    gst_object_unref(src_pad);
+    if (!gv->src) {
+        error_setg(errp, "failed to get pipeline src element");
+        return;
+    }
+
+    gv->sink = gst_element_factory_make ("appsink", "sink");
+    if (!gv->sink) {
+        error_setg(errp, "failed to create appsink");
+        return;
+    }
+
+    gst_bin_add(GST_BIN(gv->pipeline), gv->sink);
+
+    if (!gst_element_link(gv->src, gv->sink)) {
+        error_setg(errp, "failed to link pipeline to appsink");
+        return;
+    }
+
+    gst_element_set_state(gv->pipeline, GST_STATE_READY);
+}
+
+typedef struct {
+    const char *format;
+    uint32_t fourcc;
+} FormatFourCC;
+
+FormatFourCC formatFourCCMap[] = {
+    {"YUY2", QEMU_VIDEO_PIX_FMT_YUYV},
+};
+
+static uint32_t gst_format_to_fourcc(const char *format) {
+    int i;
+
+    if (!format)
+        return 0;
+
+    for (i = 0; i < ARRAY_SIZE(formatFourCCMap); i++) {
+        if (!strcmp(formatFourCCMap[i].format, format))
+            return formatFourCCMap[i].fourcc;
+    }
+
+    return 0;
+}
+
+static void video_gstreamer_enum_modes(Videodev *vd, Error **errp)
+{
+    GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
+    GstPad *src_pad;
+    GstCaps *src_caps;
+    const GstStructure *s;
+    uint32_t pixelformat;
+    VideoMode *mode;
+    VideoFramesize *frmsz;
+    VideoFramerate *frmival;
+
+    int i, j;
+    const gchar *name, *format;
+    const GValue *width, *height, *framerates;
+
+    src_pad = gst_element_get_static_pad(gv->src, "src");
+    if (!src_pad) {
+        error_setg(errp, "failed to get src pad");
+        return;
+    }
+
+    src_caps = gst_pad_query_caps(src_pad, NULL);
+    if (!src_caps) {
+        error_setg(errp, "failed to get capabilities from src pad");
+        return;
+    }
+
+    for (i = 0; i < gst_caps_get_size(src_caps); i++) {
+        s = gst_caps_get_structure(src_caps, i);
+
+        name = gst_structure_get_name(s);
+        if (strcmp(name, "video/x-raw"))
+            continue;
+
+        format = gst_structure_get_string(s, "format");
+        if (!format)
+            continue;
+
+        pixelformat = gst_format_to_fourcc(format);
+        if (pixelformat == 0)
+            continue;
+
+        if (!gst_structure_has_field(s, "width"))
+            continue;
+
+        width = gst_structure_get_value(s, "width");
+
+        if (GST_VALUE_HOLDS_INT_RANGE(width))
+            continue;
+
+        if (!gst_structure_has_field(s, "height"))
+            continue;
+
+        height = gst_structure_get_value(s, "height");
+
+        if (GST_VALUE_HOLDS_INT_RANGE(height))
+            continue;
+
+        if (!gst_structure_has_field(s, "framerate"))
+            continue;
+
+        framerates = gst_structure_get_value(s, "framerate");
+
+        mode = NULL;
+        for (j = 0;j < vd->nmode; j++) {
+            if (vd->modes[j].pixelformat == pixelformat) {
+                mode = &vd->modes[j];
+                break;
+            }
+        }
+
+        if (!mode) {
+            vd->nmode++;
+            vd->modes = g_realloc(vd->modes, vd->nmode * sizeof(VideoMode));
+            mode = &vd->modes[vd->nmode - 1];
+            mode->pixelformat = pixelformat;
+            mode->framesizes = NULL;
+            mode->nframesize = 0;
+        }
+
+        mode->nframesize++;
+        mode->framesizes = g_realloc(mode->framesizes, mode->nframesize * sizeof(VideoFramesize));
+        frmsz = &mode->framesizes[mode->nframesize - 1];
+
+        frmsz->width = g_value_get_int(width);
+        frmsz->height = g_value_get_int(height);
+        frmsz->framerates = NULL;
+        frmsz->nframerate = 0;
+
+        if (GST_VALUE_HOLDS_LIST(framerates)) {
+            for (j = 0; j < gst_value_list_get_size(framerates); ++j) {
+                const GValue *value = gst_value_list_get_value(framerates, j);
+
+                if (GST_VALUE_HOLDS_FRACTION(value)) {
+                    frmsz->nframerate++;
+                    frmsz->framerates = g_realloc(frmsz->framerates, frmsz->nframerate * sizeof(VideoFramerate));
+
+                    frmival = &frmsz->framerates[frmsz->nframerate - 1];
+                    frmival->numerator = gst_value_get_fraction_numerator(value);
+                    frmival->denominator = gst_value_get_fraction_denominator(value);
+                }
+            }
+        } else if (GST_VALUE_HOLDS_FRACTION(framerates)) {
+            frmsz->nframerate++;
+            frmsz->framerates = g_realloc(frmsz->framerates, frmsz->nframerate * sizeof(VideoFramerate));
+
+            frmival = &frmsz->framerates[frmsz->nframerate - 1];
+            frmival->numerator = gst_value_get_fraction_numerator(framerates);
+            frmival->denominator = gst_value_get_fraction_denominator(framerates);
+        }
+    }
 }
 
 static void video_gstreamer_class_init(ObjectClass *oc, void *data)
@@ -31,6 +210,7 @@ static void video_gstreamer_class_init(ObjectClass *oc, void *data)
     VideodevClass *vc = VIDEODEV_CLASS(oc);
 
     vc->parse = video_gstreamer_parse;
+    vc->enum_modes = video_gstreamer_enum_modes;
 }
 
 static const TypeInfo video_v4l2_type_info = {
