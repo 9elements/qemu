@@ -11,11 +11,13 @@
                           ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 
 #define QEMU_VIDEO_PIX_FMT_YUYV   fourcc_code('Y', 'U', 'Y', 'V')
+#define QEMU_VIDEO_PIX_FMT_NV12   fourcc_code('N', 'V', '1', '2')
 
 static inline bool qemu_video_pixfmt_supported(uint32_t pixfmt)
 {
     switch (pixfmt) {
     case QEMU_VIDEO_PIX_FMT_YUYV:
+    case QEMU_VIDEO_PIX_FMT_NV12:
     return true;
     }
 

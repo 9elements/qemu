@@ -22,6 +22,15 @@
 #include "desc.h"
 #include "trace.h"
 
+struct USBVideoState {
+    /* qemu interfaces */
+    USBDevice dev;
+    Videodev *video;
+};
+
+#define TYPE_USB_VIDEO "usb-video"
+OBJECT_DECLARE_SIMPLE_TYPE(USBVideoState, USB_VIDEO)
+
 #define USBVIDEO_VENDOR_NUM     0x46f4 /* CRC16() of "QEMU" */
 #define USBVIDEO_PRODUCT_NUM    0x0001
 
@@ -146,6 +155,181 @@ static const USBDescEndpoint vs_iface_eps[] = {
     },
 };
 
+#define VS_HEADER_LEN                  0xe
+#define VS_FORMAT_UNCOMPRESSED_LEN     0x1b
+#define VS_FORMAT_MJPEG_LEN            0xb
+#define VS_FRAME_MIN_LEN 0x1a
+#define VS_FRAME_SIZE(n)  (VS_FRAME_MIN_LEN+4*(n))
+
+static void usb_video_parse_vs_header(USBDescOther *header, uint16_t wTotalLength)
+{
+    uint8_t *data;
+    /* Class-specific VS Header Descriptor (Input) */
+    uint8_t header_data[] = {
+        VS_HEADER_LEN,              /*  u8  bLength */
+        CS_INTERFACE,               /*  u8  bDescriptorType */
+        VS_INPUT_HEADER,            /*  u8  bDescriptorSubtype */
+        0x01,                       /*  u8  bNumFormats */
+        U16(wTotalLength),          /* u16  wTotalLength */
+        USB_DIR_IN | EP_STREAMING,  /*  u8  bEndPointAddress */
+        0x00,                       /*  u8  bmInfo */
+        OUTPUT_TERMINAL,            /*  u8  bTerminalLink */
+        0x01,                       /*  u8  bStillCaptureMethod */
+        0x01,                       /*  u8  bTriggerSupport */
+        0x00,                       /*  u8  bTriggerUsage */
+        0x01,                       /*  u8  bControlSize */
+        0x00,                       /*  u8  bmaControls */
+    };
+
+    header->length = header_data[0];
+    data = g_malloc0(header->length);
+    memcpy(data, header_data, VS_HEADER_LEN);
+    header->data = data;
+}
+
+static uint8_t usb_video_pixfmt_to_vsfmt(uint32_t pixfmt)
+{
+    switch (pixfmt) {
+    case QEMU_VIDEO_PIX_FMT_YUYV:
+    case QEMU_VIDEO_PIX_FMT_NV12:
+        return VS_FORMAT_UNCOMPRESSED;
+    }
+
+    return VS_UNDEFINED;
+}
+
+static void usb_video_parse_vs_frame(USBDescIface *iface, VideoFramesize * frmsz, int frame_index, int *len)
+{
+    USBDescOther *desc;
+    uint8_t *data, bLength = VS_FRAME_SIZE(frmsz->nframerate);
+    uint16_t wWidth = frmsz->width;
+    uint16_t wHeight = frmsz->height;
+    // XXX: Parse from format descriptor
+    uint8_t bDescriptorSubtype = VS_FRAME_UNCOMPRESSED;
+    int i;
+    uint32_t *ival;
+    VideoFramerate frmival;
+    uint8_t bFrameIntervalType = frmsz->nframerate;
+
+    /* Class-specific VS Frame Descriptor */
+    uint8_t frame_data[] = {
+        bLength,                    /*  u8  bLength */
+        CS_INTERFACE,               /*  u8  bDescriptorType */
+        bDescriptorSubtype,         /*  u8  bDescriptorSubtype */
+        frame_index,                /*  u8  bFrameIndex */
+        0x03,                       /*  u8  bmCapabilities */
+        U16(wWidth),                /* u16  wWidth */
+        U16(wHeight),               /* u16  wHeight */
+        U32(442368000),             /* u32  dwMinBitRate */
+        U32(442368000),             /* u32  dwMaxBitRate */
+        // XXX
+        U32(0),                     /* u32  dwMaxVideoFrameBufSize */
+        // XXX
+        U32(0),                     /* u32  dwDefaultFrameInterval */
+        bFrameIntervalType,         /*  u8  bFrameIntervalType */
+    };
+
+    iface->ndesc++;
+    iface->descs = g_realloc(iface->descs,
+                             iface->ndesc * sizeof(USBDescOther));
+    desc = &iface->descs[iface->ndesc - 1];
+    desc->length = frame_data[0];
+    data = g_malloc0(frame_data[0]);
+    memcpy(data, frame_data, VS_FRAME_MIN_LEN);
+    desc->data = data;
+    *len += desc->length;
+
+    for (i = 0; i < bFrameIntervalType; i++) {
+        frmival = frmsz->framerates[i];
+        ival = (uint32_t *)((void*)data + VS_FRAME_MIN_LEN + 4 * i);
+        *ival = cpu_to_le32(10000000 * frmival.numerator / frmival.denominator);
+    }
+}
+
+static void usb_video_parse_vs_format(USBDescIface *iface, VideoMode *mode, int format_index, int *len)
+{
+    int i;
+    USBDescOther *desc;
+    uint8_t *data, *format_data;
+    uint8_t bDescriptorSubtype = usb_video_pixfmt_to_vsfmt(mode->pixelformat);
+    uint8_t bNumFrameDescriptors = mode->nframesize;
+
+    assert(qemu_video_pixfmt_supported(mode->pixelformat));
+    switch(mode->pixelformat) {
+    case QEMU_VIDEO_PIX_FMT_YUYV:
+        format_data = (uint8_t[]) {
+            VS_FORMAT_UNCOMPRESSED_LEN, /*  u8  bLength */
+            CS_INTERFACE,               /*  u8  bDescriptorType */
+            bDescriptorSubtype,         /*  u8  bDescriptorSubtype */
+            format_index,               /*  u8  bFormatIndex */
+            bNumFrameDescriptors,       /*  u8  bNumFrameDescriptors */
+            /* guidFormat */
+             'Y',  'U',  'Y',  '2', 0x00, 0x00, 0x10, 0x00,
+            0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+            0x10,                       /*  u8  bBitsPerPixel */
+            0x01,                       /*  u8  bDefaultFrameIndex */
+            0x00,                       /*  u8  bAspectRatioX */
+            0x00,                       /*  u8  bAspectRatioY */
+            0x00,                       /*  u8  bmInterlaceFlags */
+            0x00,                       /*  u8  bCopyProtect */
+        };
+        break;
+    case QEMU_VIDEO_PIX_FMT_NV12:
+        format_data = (uint8_t[]) {
+            VS_FORMAT_UNCOMPRESSED_LEN, /*  u8  bLength */
+            CS_INTERFACE,               /*  u8  bDescriptorType */
+            bDescriptorSubtype,         /*  u8  bDescriptorSubtype */
+            format_index,               /*  u8  bFormatIndex */
+            bNumFrameDescriptors,       /*  u8  bNumFrameDescriptors */
+            /* guidFormat */
+             'N',  'V',  '1',  '2', 0x00, 0x00, 0x10, 0x00,
+            0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+            0x10,                       /*  u8  bBitsPerPixel */
+            0x01,                       /*  u8  bDefaultFrameIndex */
+            0x00,                       /*  u8  bAspectRatioX */
+            0x00,                       /*  u8  bAspectRatioY */
+            0x00,                       /*  u8  bmInterlaceFlags */
+            0x00,                       /*  u8  bCopyProtect */
+        };
+        break;
+    }
+
+    iface->ndesc++;
+    iface->descs = g_realloc(iface->descs,
+                             iface->ndesc * sizeof(USBDescOther));
+    desc = &iface->descs[iface->ndesc - 1];
+    desc->length = format_data[0];
+    data = g_malloc0(desc->length);
+    memcpy(data, format_data, format_data[0]);
+    desc->data = data;
+    *len += desc->length;
+
+    for (i = 0; i < bNumFrameDescriptors; i++) {
+        usb_video_parse_vs_frame(iface, &mode->framesizes[i], i + 1, len);
+    }
+}
+
+static void usb_video_parse_vs_desc(USBVideoState *s, USBDescIface *iface)
+{
+    int i, len;
+
+    assert(s->video);
+    assert(iface->descs == NULL);
+    assert(iface->ndesc == 0);
+
+    // parse the header descriptors once we know the total size.
+    len = VS_HEADER_LEN;
+    iface->ndesc = 1;
+    iface->descs = g_new0(USBDescOther, iface->ndesc);
+
+    // parse all formats
+    for (i = 0;i < s->video->nmode; i++) {
+        usb_video_parse_vs_format(iface, &s->video->modes[i], i + 1, &len);
+    }
+
+    usb_video_parse_vs_header(&iface->descs[0], len);
+}
+
 enum video_desc_iface_idx {
     VC = 0,
     VS0,
@@ -156,6 +340,7 @@ enum video_desc_iface_idx {
 static const USBDescIface *usb_video_desc_iface_new(USBDevice *dev)
 {
 
+    USBVideoState *s = USB_VIDEO(dev);
     USBDescIface *d = g_new0(USBDescIface, USB_VIDEO_IFACE_COUNT);
 
     d[VC].bInterfaceNumber   = IF_CONTROL;
@@ -185,6 +370,8 @@ static const USBDescIface *usb_video_desc_iface_new(USBDevice *dev)
     d[VS1].iInterface         = STR_VIDEO_STREAMING_ALTERNATE1;
     d[VS1].bNumEndpoints      = ARRAY_SIZE(vs_iface_eps);
     d[VS1].eps                = (USBDescEndpoint *)vs_iface_eps;
+
+    usb_video_parse_vs_desc(s, &d[VS0]);
 
     return d;
 }
@@ -284,16 +471,6 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
 
     p->status = USB_RET_STALL;
 }
-
-
-struct USBVideoState {
-    /* qemu interfaces */
-    USBDevice dev;
-    Videodev *video;
-};
-
-#define TYPE_USB_VIDEO "usb-video"
-OBJECT_DECLARE_SIMPLE_TYPE(USBVideoState, USB_VIDEO)
 
 static void usb_video_realize(USBDevice *dev, Error **errp)
 {
