@@ -55,9 +55,6 @@ enum usb_video_strings {
     STR_MANUFACTURER,
     STR_PRODUCT,
     STR_SERIALNUMBER,
-    STR_CONFIG_FULL,
-    STR_CONFIG_HIGH,
-    STR_CONFIG_SUPER,
     STR_VIDEO_CONTROL,
     STR_INPUT_TERMINAL,
     STR_OUTPUT_TERMINAL,
@@ -69,9 +66,6 @@ static const USBDescStrings usb_video_stringtable = {
     [STR_MANUFACTURER]               = "QEMU",
     [STR_PRODUCT]                    = "QEMU USB Video",
     [STR_SERIALNUMBER]               = "1",
-    [STR_CONFIG_FULL]                = "Full speed config (usb 1.1)",
-    [STR_CONFIG_HIGH]                = "High speed config (usb 2.0)",
-    [STR_CONFIG_SUPER]               = "Super speed config (usb 3.0)",
     [STR_VIDEO_CONTROL]              = "Video Control",
     [STR_INPUT_TERMINAL]             = "Video Input Terminal",
     [STR_OUTPUT_TERMINAL]            = "Video Output Terminal",
@@ -376,12 +370,13 @@ static const USBDescIface *usb_video_desc_iface_new(USBDevice *dev)
     return d;
 }
 
-static const USBDescDevice *usb_video_desc_device_new(USBDevice *dev, const USBDescIface *ifaces, int speed)
+static const USBDescDevice *usb_video_desc_device_new(USBDevice *dev)
 {
 
     USBDescDevice *d = g_new0(USBDescDevice, 1);
     USBDescConfig *c = g_new0(USBDescConfig, 1);
 
+    d->bcdUSB              = 0x0200;
     d->bDeviceClass        = USB_CLASS_MISCELLANEOUS;
     d->bDeviceSubClass     = 2;
     d->bDeviceProtocol     = 1;
@@ -396,22 +391,7 @@ static const USBDescDevice *usb_video_desc_device_new(USBDevice *dev, const USBD
     c->nif_groups          = ARRAY_SIZE(desc_if_groups);
     c->if_groups           = desc_if_groups;
     c->nif                 = USB_VIDEO_IFACE_COUNT;
-    c->ifs                 = ifaces;
-
-    switch (speed) {
-    case USB_SPEED_FULL:
-        d->bcdUSB          = 0x0200;
-        c->iConfiguration  = STR_CONFIG_FULL;
-        break;
-    case USB_SPEED_HIGH:
-        d->bcdUSB          = 0x0200;
-        c->iConfiguration  = STR_CONFIG_HIGH;
-        break;
-    case USB_SPEED_SUPER:
-        d->bcdUSB          = 0x0300;
-        c->iConfiguration  = STR_CONFIG_SUPER;
-        break;
-    }
+    c->ifs                 = usb_video_desc_iface_new(dev);
 
     return d;
 }
@@ -419,7 +399,6 @@ static const USBDescDevice *usb_video_desc_device_new(USBDevice *dev, const USBD
 static void usb_video_desc_new(USBDevice *dev)
 {
     USBDesc *d;
-    const USBDescIface *i;
 
     d = g_new0(USBDesc, 1);
     d->id.idVendor      = USBVIDEO_VENDOR_NUM;
@@ -428,11 +407,7 @@ static void usb_video_desc_new(USBDevice *dev)
     d->id.iProduct      = STR_PRODUCT;
     d->id.iSerialNumber = STR_SERIALNUMBER;
     d->str = usb_video_stringtable;
-
-    i = usb_video_desc_iface_new(dev);
-    d->full  = usb_video_desc_device_new(dev, i, USB_SPEED_FULL);
-    d->high  = usb_video_desc_device_new(dev, i, USB_SPEED_HIGH);
-    d->super = usb_video_desc_device_new(dev, i, USB_SPEED_SUPER);
+    d->high  = usb_video_desc_device_new(dev);
 
     dev->usb_desc = d;
 }
