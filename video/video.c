@@ -163,9 +163,65 @@ error:
     return NULL;
 }
 
-static void video_instance_init(Object *obj) {
-    Videodev *vd = VIDEODEV(obj);
+int qemu_videodev_close(Videodev *vd, Error **errp) {
 
+    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+
+    if (vc->close == NULL) {
+        error_setg(errp, "%s: %s missing 'close' implementation!",
+                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        return -ENOTSUP;
+    }
+
+    vc->close(vd, errp);
+    return 0;
+}
+
+int qemu_videodev_set_mode(Videodev *vd, Error **errp) {
+
+    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+
+    if (vc->set_mode == NULL) {
+        error_setg(errp, "%s: %s missing 'set_mode' implementation!",
+                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        return -ENOTSUP;
+    }
+
+    return vc->set_mode(vd, errp);
+}
+
+
+int qemu_videodev_stream_on(Videodev *vd, Error **errp) {
+
+    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+
+    if (vc->stream_on == NULL) {
+
+        error_setg(errp, "%s: %s missing 'stream_on' implementation!",
+                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        return -ENOTSUP;
+    }
+
+    return vc->stream_on(vd, errp);
+}
+
+int qemu_videodev_stream_off(Videodev *vd, Error **errp) {
+
+    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+
+    if (vc->stream_off == NULL) {
+
+        error_setg(errp, "%s: %s missing 'stream_off' implementation!",
+                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        return -ENOTSUP;
+    }
+
+    return vc->stream_off(vd, errp);
+}
+
+static void video_instance_init(Object *obj) {
+
+    Videodev *vd = VIDEODEV(obj);
     vd->registered = false;
 }
 

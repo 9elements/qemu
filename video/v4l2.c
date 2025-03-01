@@ -9,12 +9,20 @@
 
 #define TYPE_VIDEODEV_V4L2 TYPE_VIDEODEV"-v4l2"
 
+#define V4L2_BUFFER_MAX 16
+#define V4L2_BUFFER_DFL 2
+
+typedef struct V4l2Buffer {
+    unsigned char *addr;
+    uint32_t length;
+} V4l2Buffer;
+
 struct V4l2Videodev {
     Videodev parent;
-
     int fd;
-
     char* device_path;
+    uint8_t nbuffers;
+    V4l2Buffer buffers[V4L2_BUFFER_MAX];
 };
 typedef struct V4l2Videodev V4l2Videodev;
 
@@ -70,11 +78,24 @@ static void video_v4l2_open(Videodev *vd, Error **errp)
         goto close;
     }
 
+    /* todo: allow custom value for this setting */
+    vv->nbuffers = V4L2_BUFFER_DFL;
     return;
 
 close:
     close(vv->fd);
 error:
+    g_free(vv);
+}
+
+static void video_v4l2_close(Videodev *vd, Error **errp)
+{
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+
+    if (close(vv->fd) != 0)
+        error_setg_errno(errp, errno, "cannot close device '%s'", vv->device_path);
+
+    /* todo: free memory */
     g_free(vv);
 }
 
@@ -144,13 +165,217 @@ static void video_v4l2_enum_modes(Videodev *vd, Error **errp)
     }
 }
 
+static int video_v4l2_set_mode(Videodev *vd, Error **errp)
+{
+    struct v4l2_format fmt;
+    V4l2Videodev*      vv = V4L2_VIDEODEV(vd);
+
+    /*
+     * currently selecting the very first mode using its
+     * very first framesize
+     * */
+
+    if (vd->nmode == 0) {
+        error_setg_errno(errp, errno, "no modes available for video device");
+        return -1;
+    }
+
+    if (vd->modes[0].nframesize == 0) {
+        error_setg_errno(errp, errno, "no framesize for first mode of video device");
+        return -1;
+    }
+
+    memset(&fmt, 0, sizeof(fmt));
+
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    fmt.fmt.pix.width = vd->modes[0].framesizes[0].width;
+    fmt.fmt.pix.height = vd->modes[0].framesizes[0].height;
+    fmt.fmt.pix.pixelformat = vd->modes[0].pixelformat;
+    fmt.fmt.pix.field = V4L2_FIELD_NONE;
+
+    if (ioctl(vv->fd, VIDIOC_S_FMT, &fmt) < 0) {
+        error_setg_errno(errp, errno, "VIDIOC_S_FMT");
+        return -1;
+    }
+
+    if (ioctl(vv->fd, VIDIOC_G_FMT, &fmt) < 0) {
+        error_setg_errno(errp, errno, "VIDIOC_G_FMT");
+        return -1;
+    }
+
+    /* TODO: print applied video format */
+    return 0;
+}
+
+// @private
+static int video_v4l2_qbuf(Videodev *vd, const int index) {
+
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+
+    struct v4l2_buffer buf = {
+        .index  = index,
+        .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .field  = V4L2_FIELD_ANY,
+        .memory = V4L2_MEMORY_MMAP
+    };
+
+    return ioctl(vv->fd, VIDIOC_QBUF, &buf);
+}
+
+// @private
+static int video_v4l2_dqbuf(Videodev *vd, int *index) {
+
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    int ioctl_status = 0;
+
+    struct v4l2_buffer buf = {
+        .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .memory = V4L2_MEMORY_MMAP
+    };
+
+    if ((ioctl_status = ioctl(vv->fd, VIDIOC_DQBUF, &buf)) < 0)
+        return ioctl_status;
+
+    *index = buf.index;
+    return ioctl_status;
+}
+
+// @private
+static void video_v4l2_free_buffers(Videodev *vd) {
+
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+
+    struct v4l2_requestbuffers v4l2_reqbufs = {
+        .count  = 0,
+        .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .memory = V4L2_MEMORY_MMAP
+    };
+
+    for (int i = 0; i < vv->nbuffers; i++) {
+
+        int index = 0;
+        video_v4l2_dqbuf(vd, &index);
+    }
+
+    for (int i = 0; i < vv->nbuffers; i++) {
+
+        V4l2Buffer *current_buf = &vv->buffers[i];
+
+        if (current_buf->addr == NULL)
+            continue;
+
+        munmap(current_buf->addr, current_buf->length);
+
+        *current_buf = (V4l2Buffer) { // todo: check if vv.buffers need init at construction
+            .addr   = NULL,
+            .length = 0
+        };
+    }
+
+    ioctl(vv->fd, VIDIOC_REQBUFS, &v4l2_reqbufs);
+}
+
+// @private
+static int video_v4l2_setup_buffers(Videodev *vd, Error **errp) {
+
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+
+    struct v4l2_requestbuffers v4l2_reqbufs = {
+        .count  = vv->nbuffers,
+        .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .memory = V4L2_MEMORY_MMAP
+    };
+
+    if (ioctl(vv->fd, VIDIOC_REQBUFS, &v4l2_reqbufs) < 0) {
+        error_setg_errno(errp, errno, "VIDIOC_REQBUFS");
+        return -1;
+    }
+
+    for (int i = 0; i < vv->nbuffers; i++) {
+
+        struct v4l2_buffer v4l2_buf = {
+            .index  = i,
+            .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+            .memory = V4L2_MEMORY_MMAP,
+            .length = 0
+        };
+
+        if (ioctl(vv->fd, VIDIOC_QUERYBUF, &v4l2_buf) < 0) {
+            error_setg_errno(errp, errno, "VIDIOC_QUERYBUF");
+            goto video_v4l2_setup_buffers_error;
+        }
+
+        if (v4l2_buf.type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+            continue;
+
+        void *addr = mmap(NULL, v4l2_buf.length, PROT_READ | PROT_WRITE,
+                          MAP_SHARED, vv->fd, v4l2_buf.m.offset);
+
+        if (addr == MAP_FAILED) {
+            error_setg_errno(errp, errno, "mmap failure");
+            goto video_v4l2_setup_buffers_error;
+        }
+
+        if (video_v4l2_qbuf(vd, i) < 0) {
+            error_setg_errno(errp, errno, "VIDIOC_QBUF");
+            goto video_v4l2_setup_buffers_error;
+        }
+
+        vv->buffers[i].addr   = addr;
+        vv->buffers[i].length = v4l2_buf.length;
+    }
+
+    return 0;
+
+video_v4l2_setup_buffers_error:
+    video_v4l2_free_buffers(vd);
+    return -1;
+}
+
+static int video_v4l2_stream_on(Videodev *vd, Error **errp) {
+
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+    if (video_v4l2_setup_buffers(vd, errp) != 0)
+        return -1;
+
+    if (ioctl(vv->fd, VIDIOC_STREAMON, &type) < 0) {
+
+        video_v4l2_free_buffers(vd);
+        error_setg_errno(errp, errno, "VIDIOC_STREAMON");
+        return -1;
+    }
+
+    return 0;
+}
+
+static int video_v4l2_stream_off(Videodev *vd, Error **errp) {
+
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    int retval = 0;
+
+    if (ioctl(vv->fd, VIDIOC_STREAMOFF, &type) < 0) {
+        error_setg_errno(errp, errno, "VIDIOC_STREAMOFF");
+        retval = -1;
+    }
+
+    video_v4l2_free_buffers(vd);
+    return retval;
+}
+
 static void video_v4l2_class_init(ObjectClass *oc, void *data)
 {
     VideodevClass *vc = VIDEODEV_CLASS(oc);
 
     vc->parse = video_v4l2_parse;
     vc->open = video_v4l2_open;
+    vc->close = video_v4l2_close;
     vc->enum_modes = video_v4l2_enum_modes;
+    vc->set_mode = video_v4l2_set_mode;
+    vc->stream_on = video_v4l2_stream_on;
+    vc->stream_off = video_v4l2_stream_off;
 }
 
 static const TypeInfo video_v4l2_type_info = {

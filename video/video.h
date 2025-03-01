@@ -66,11 +66,27 @@ struct VideodevClass {
     void (*parse)(Videodev *vd, QemuOpts *opts, Error **errp);
     /* called after construction, open/starts the backend */
     void (*open)(Videodev *vd, Error **errp);
-    /* enumerat all supported modes */
+    /* called after deconstruction, closes the backend */
+    void (*close)(Videodev *vd, Error **errp);
+    /* enumerate all supported modes */
     void (*enum_modes)(Videodev *vd, Error **errp);
+    /* set a specific video format mode */
+    int (*set_mode)(Videodev *vd, Error **errp);
+    /* start video capture stream */
+    int (*stream_on)(Videodev *vd, Error **errp);
+    /* stop video capture stream */
+    int (*stream_off)(Videodev *vd, Error **errp);
 };
 
+/* ====== */
+
 Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp);
+int qemu_videodev_close(Videodev *vd, Error **errp);
+int qemu_videodev_set_mode(Videodev *vd, Error **errp);
+int qemu_videodev_stream_on(Videodev *vd, Error **errp);
+int qemu_videodev_stream_off(Videodev *vd, Error **errp);
+
+/* ====== */
 
 char *qemu_videodev_get_id(Videodev *vd);
 Videodev *qemu_videodev_by_id(char *id, Error **errp);
