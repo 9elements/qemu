@@ -163,17 +163,25 @@ error:
     return NULL;
 }
 
-int qemu_videodev_close(Videodev *vd, Error **errp) {
+int qemu_videodev_delete(Videodev *vd, Error **errp) {
 
     VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
 
-    if (vc->close == NULL) {
-        error_setg(errp, "%s: %s missing 'close' implementation!",
+    if (qemu_videodev_stream_off(vd, errp) != 0) {
+
+        error_setg(errp, "%s: %s stream_off failure duringdevice deletion!",
                    TYPE_VIDEODEV, qemu_videodev_get_id(vd));
-        return -ENOTSUP;
+        return -1;
     }
 
-    vc->close(vd, errp);
+    if (vc->close)
+        vc->close(vd, errp);
+
+    free(vd->id);
+    QLIST_REMOVE(vd, list);
+
+    // todo: object_new (manual free or not?)
+
     return 0;
 }
 
@@ -182,6 +190,7 @@ int qemu_videodev_set_mode(Videodev *vd, Error **errp) {
     VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
 
     if (vc->set_mode == NULL) {
+
         error_setg(errp, "%s: %s missing 'set_mode' implementation!",
                    TYPE_VIDEODEV, qemu_videodev_get_id(vd));
         return -ENOTSUP;

@@ -81,7 +81,7 @@ struct VideodevClass {
 /* ====== */
 
 Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp);
-int qemu_videodev_close(Videodev *vd, Error **errp);
+int qemu_videodev_delete(Videodev *vd, Error **errp);
 int qemu_videodev_set_mode(Videodev *vd, Error **errp);
 int qemu_videodev_stream_on(Videodev *vd, Error **errp);
 int qemu_videodev_stream_off(Videodev *vd, Error **errp);
