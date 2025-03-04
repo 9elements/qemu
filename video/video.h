@@ -66,7 +66,7 @@ struct VideodevClass {
     void (*parse)(Videodev *vd, QemuOpts *opts, Error **errp);
     /* called after construction, open/starts the backend */
     void (*open)(Videodev *vd, Error **errp);
-    /* called after deconstruction, closes the backend */
+    /* called upon deconstruction, closes the backend and frees resources */
     void (*close)(Videodev *vd, Error **errp);
     /* enumerate all supported modes */
     void (*enum_modes)(Videodev *vd, Error **errp);

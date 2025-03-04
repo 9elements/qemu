@@ -177,7 +177,7 @@ int qemu_videodev_delete(Videodev *vd, Error **errp) {
     if (vc->close)
         vc->close(vd, errp);
 
-    free(vd->id);
+    g_free(vd->id);
     QLIST_REMOVE(vd, list);
 
     // todo: object_new (manual free or not?)

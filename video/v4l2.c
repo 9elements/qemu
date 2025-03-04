@@ -95,7 +95,7 @@ static void video_v4l2_close(Videodev *vd, Error **errp)
     if (close(vv->fd) != 0)
         error_setg_errno(errp, errno, "cannot close device '%s'", vv->device_path);
 
-    /* todo: free memory */
+    g_free(vv->device_path);
     g_free(vv);
 }
 
