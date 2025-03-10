@@ -398,8 +398,6 @@ static const USBDescDevice *usb_video_desc_device_new(USBDevice *dev)
 
 static void usb_video_desc_new(USBDevice *dev)
 {
-    // todo: why not statically initialized?
-
     USBDesc *d;
 
     d = g_new0(USBDesc, 1);

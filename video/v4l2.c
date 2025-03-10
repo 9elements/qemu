@@ -347,6 +347,8 @@ static int video_v4l2_stream_on(Videodev *vd, Error **errp) {
         return -1;
     }
 
+    // todo: capture frames
+
     return 0;
 }
 

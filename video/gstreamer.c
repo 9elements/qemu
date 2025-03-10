@@ -205,12 +205,63 @@ static void video_gstreamer_enum_modes(Videodev *vd, Error **errp)
     }
 }
 
+static gboolean video_gstreamer_bus_callback(GstBus *bus, GstMessage *msg, gpointer data)
+{
+    // todo: handle and log gstreamer errors
+
+    switch (GST_MESSAGE_TYPE(msg)) {
+
+        case GST_MESSAGE_ERROR: {
+
+            break;
+        }
+
+        case GST_MESSAGE_EOS: {
+
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    return TRUE;
+}
+
+static int video_gstreamer_stream_on(Videodev *vd, Error **errp)
+{
+    GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
+    GstStateChangeReturn ret;
+    GstBus *bus;
+
+    if (!gv || !gv->pipeline) {
+        error_setg(errp, "GStreamer pipeline not initialized!");
+        return -1;
+    }
+
+    ret = gst_element_set_state(gv->pipeline, GST_STATE_PLAYING);
+
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        error_setg(errp, "Failed to start GStreamer pipeline!");
+        return -1;
+    }
+
+    bus = gst_element_get_bus(gv->pipeline);
+    gst_bus_add_watch(bus, video_gstreamer_bus_callback, NULL);
+    gst_object_unref(bus);
+
+    // todo: capture frames
+
+    return 0;
+}
+
 static void video_gstreamer_class_init(ObjectClass *oc, void *data)
 {
     VideodevClass *vc = VIDEODEV_CLASS(oc);
 
     vc->parse = video_gstreamer_parse;
     vc->enum_modes = video_gstreamer_enum_modes;
+    vc->stream_on = video_gstreamer_stream_on;
 }
 
 static const TypeInfo video_v4l2_type_info = {
