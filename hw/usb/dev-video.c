@@ -55,6 +55,7 @@ enum usb_video_strings {
     STR_MANUFACTURER,
     STR_PRODUCT,
     STR_SERIALNUMBER,
+    STR_CONFIG,
     STR_VIDEO_CONTROL,
     STR_INPUT_TERMINAL,
     STR_OUTPUT_TERMINAL,
@@ -66,6 +67,7 @@ static const USBDescStrings usb_video_stringtable = {
     [STR_MANUFACTURER]               = "QEMU",
     [STR_PRODUCT]                    = "QEMU USB Video",
     [STR_SERIALNUMBER]               = "1",
+    [STR_CONFIG]                     = "Video Configuration",
     [STR_VIDEO_CONTROL]              = "Video Control",
     [STR_INPUT_TERMINAL]             = "Video Input Terminal",
     [STR_OUTPUT_TERMINAL]            = "Video Output Terminal",
@@ -370,22 +372,24 @@ static const USBDescIface *usb_video_desc_iface_new(USBDevice *dev)
     return d;
 }
 
-static const USBDescDevice *usb_video_desc_device_new(USBDevice *dev)
+static const USBDescDevice *usb_video_desc_device_new(USBDevice *dev,
+                                                      const uint16_t bcdUSB,
+                                                      const uint8_t bMaxPacketSize0)
 {
-
     USBDescDevice *d = g_new0(USBDescDevice, 1);
     USBDescConfig *c = g_new0(USBDescConfig, 1);
 
-    d->bcdUSB              = 0x0200;
+    d->bcdUSB              = bcdUSB;
     d->bDeviceClass        = USB_CLASS_MISCELLANEOUS;
     d->bDeviceSubClass     = 2;
     d->bDeviceProtocol     = 1;
-    d->bMaxPacketSize0     = 8;
+    d->bMaxPacketSize0     = bMaxPacketSize0;
     d->bNumConfigurations  = 1;
 
     d->confs = c;
     c->bNumInterfaces      = 2;
     c->bConfigurationValue = 1;
+    c->iConfiguration      = STR_CONFIG;
     c->bmAttributes        = USB_CFG_ATT_ONE | USB_CFG_ATT_SELFPOWER;
     c->bMaxPower           = 0x32;
     c->nif_groups          = ARRAY_SIZE(desc_if_groups);
@@ -406,8 +410,9 @@ static void usb_video_desc_new(USBDevice *dev)
     d->id.iManufacturer = STR_MANUFACTURER;
     d->id.iProduct      = STR_PRODUCT;
     d->id.iSerialNumber = STR_SERIALNUMBER;
-    d->str = usb_video_stringtable;
-    d->high  = usb_video_desc_device_new(dev);
+    d->str              = usb_video_stringtable;
+    d->full             = usb_video_desc_device_new(dev, 0x0100, 8);
+    d->high             = usb_video_desc_device_new(dev, 0x0200, 64);
 
     dev->usb_desc = d;
 }
