@@ -353,43 +353,47 @@ static void usb_video_parse_vs_format(USBDescIface *iface, VideoMode *mode, int 
     uint8_t bDescriptorSubtype = usb_video_pixfmt_to_vsfmt(mode->pixelformat);
     uint8_t bNumFrameDescriptors = mode->nframesize;
 
+    uint8_t yuyv_fmt[] = {
+        VS_FORMAT_UNCOMPRESSED_LEN, /*  u8  bLength */
+        CS_INTERFACE,               /*  u8  bDescriptorType */
+        bDescriptorSubtype,         /*  u8  bDescriptorSubtype */
+        format_index,               /*  u8  bFormatIndex */
+        bNumFrameDescriptors,       /*  u8  bNumFrameDescriptors */
+        /* guidFormat */
+        'Y',  'U',  'Y',  '2', 0x00, 0x00, 0x10, 0x00,
+        0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+        0x10,                       /*  u8  bBitsPerPixel */
+        0x01,                       /*  u8  bDefaultFrameIndex */
+        0x00,                       /*  u8  bAspectRatioX */
+        0x00,                       /*  u8  bAspectRatioY */
+        0x00,                       /*  u8  bmInterlaceFlags */
+        0x00,                       /*  u8  bCopyProtect */
+    };
+
+    uint8_t nv12_fmt[] = {
+        VS_FORMAT_UNCOMPRESSED_LEN, /*  u8  bLength */
+        CS_INTERFACE,               /*  u8  bDescriptorType */
+        bDescriptorSubtype,         /*  u8  bDescriptorSubtype */
+        format_index,               /*  u8  bFormatIndex */
+        bNumFrameDescriptors,       /*  u8  bNumFrameDescriptors */
+        /* guidFormat */
+        'N',  'V',  '1',  '2', 0x00, 0x00, 0x10, 0x00,
+        0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+        0x10,                       /*  u8  bBitsPerPixel */
+        0x01,                       /*  u8  bDefaultFrameIndex */
+        0x00,                       /*  u8  bAspectRatioX */
+        0x00,                       /*  u8  bAspectRatioY */
+        0x00,                       /*  u8  bmInterlaceFlags */
+        0x00,                       /*  u8  bCopyProtect */
+    };
+
     assert(qemu_video_pixfmt_supported(mode->pixelformat));
     switch(mode->pixelformat) {
     case QEMU_VIDEO_PIX_FMT_YUYV:
-        format_data = (uint8_t[]) {
-            VS_FORMAT_UNCOMPRESSED_LEN, /*  u8  bLength */
-            CS_INTERFACE,               /*  u8  bDescriptorType */
-            bDescriptorSubtype,         /*  u8  bDescriptorSubtype */
-            format_index,               /*  u8  bFormatIndex */
-            bNumFrameDescriptors,       /*  u8  bNumFrameDescriptors */
-            /* guidFormat */
-             'Y',  'U',  'Y',  '2', 0x00, 0x00, 0x10, 0x00,
-            0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
-            0x10,                       /*  u8  bBitsPerPixel */
-            0x01,                       /*  u8  bDefaultFrameIndex */
-            0x00,                       /*  u8  bAspectRatioX */
-            0x00,                       /*  u8  bAspectRatioY */
-            0x00,                       /*  u8  bmInterlaceFlags */
-            0x00,                       /*  u8  bCopyProtect */
-        };
+        format_data = yuyv_fmt;
         break;
     case QEMU_VIDEO_PIX_FMT_NV12:
-        format_data = (uint8_t[]) {
-            VS_FORMAT_UNCOMPRESSED_LEN, /*  u8  bLength */
-            CS_INTERFACE,               /*  u8  bDescriptorType */
-            bDescriptorSubtype,         /*  u8  bDescriptorSubtype */
-            format_index,               /*  u8  bFormatIndex */
-            bNumFrameDescriptors,       /*  u8  bNumFrameDescriptors */
-            /* guidFormat */
-             'N',  'V',  '1',  '2', 0x00, 0x00, 0x10, 0x00,
-            0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
-            0x10,                       /*  u8  bBitsPerPixel */
-            0x01,                       /*  u8  bDefaultFrameIndex */
-            0x00,                       /*  u8  bAspectRatioX */
-            0x00,                       /*  u8  bAspectRatioY */
-            0x00,                       /*  u8  bmInterlaceFlags */
-            0x00,                       /*  u8  bCopyProtect */
-        };
+        format_data = nv12_fmt;
         break;
     }
 
