@@ -199,6 +199,19 @@ int qemu_videodev_set_mode(Videodev *vd, Error **errp) {
     return vc->set_mode(vd, errp);
 }
 
+int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp) {
+
+    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+
+    if (vc->set_control == NULL) {
+
+        error_setg(errp, "%s: %s missing 'set_control' implementation!",
+                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        return -ENOTSUP;
+    }
+
+    return vc->set_control(vd, ctrl, errp);
+}
 
 int qemu_videodev_stream_on(Videodev *vd, Error **errp) {
 

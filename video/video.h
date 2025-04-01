@@ -12,6 +12,21 @@
 
 #define QEMU_VIDEO_PIX_FMT_YUYV   fourcc_code('Y', 'U', 'Y', 'V')
 #define QEMU_VIDEO_PIX_FMT_NV12   fourcc_code('N', 'V', '1', '2')
+#define QEMU_VIDEO_PIX_FMT_MJPEG  fourcc_code('M', 'J', 'P', 'G')
+#define QEMU_VIDEO_PIX_FMT_RGB565 fourcc_code('R', 'G', 'B', 'P')
+
+typedef enum VideodevControlType {
+    VideodevBrightness,
+    VideodevContrast,
+    VideodevGain,
+    VideodevGamma,
+    VideodevHue,
+    VideodevHueAuto,
+    VideodevSaturation,
+    VideodevSharpness,
+    VideodevWhiteBalanceTemperature,
+    VideodevControlMax
+} VideodevControlType;
 
 static inline bool qemu_video_pixfmt_supported(uint32_t pixfmt)
 {
@@ -23,6 +38,15 @@ static inline bool qemu_video_pixfmt_supported(uint32_t pixfmt)
 
     return false;
 }
+
+typedef struct VideodevControl {
+    VideodevControlType type;
+    int32_t cur;
+    int32_t def;
+    int32_t min;
+    int32_t max;
+    int32_t step;
+} VideodevControl;
 
 typedef struct VideoFramerate {
     uint32_t numerator;
@@ -36,6 +60,29 @@ typedef struct VideoFramesize {
     int nframerate;
     VideoFramerate *framerates;
 } VideoFramesize;
+
+#define VIDEO_FRMIVAL_TYPE_DISCRETE 0x00
+#define VIDEO_FRMIVAL_TYPE_STEPWISE 0x01
+
+typedef struct VideoFrameInterval {
+    uint32_t pixel_format;
+    uint32_t width;
+    uint32_t height;
+
+    uint32_t type;
+    union {
+        struct FrameIntervalDiscrete {
+            uint32_t numerator;
+            uint32_t denominator;
+        } d;
+
+        struct FrameIntervalStepwise {
+            struct FrameIntervalDiscrete min;
+            struct FrameIntervalDiscrete max;
+            struct FrameIntervalDiscrete step;
+        } s;
+    };
+} VideoFrameInterval;
 
 typedef struct VideoModes {
     uint32_t pixelformat;
@@ -72,6 +119,8 @@ struct VideodevClass {
     void (*enum_modes)(Videodev *vd, Error **errp);
     /* set a specific video format mode */
     int (*set_mode)(Videodev *vd, Error **errp);
+    /* set control */
+    int (*set_control)(Videodev *vd, VideodevControl *ctrl, Error **errp);
     /* start video capture stream */
     int (*stream_on)(Videodev *vd, Error **errp);
     /* stop video capture stream */
@@ -83,6 +132,7 @@ struct VideodevClass {
 Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp);
 int qemu_videodev_delete(Videodev *vd, Error **errp);
 int qemu_videodev_set_mode(Videodev *vd, Error **errp);
+int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp);
 int qemu_videodev_stream_on(Videodev *vd, Error **errp);
 int qemu_videodev_stream_off(Videodev *vd, Error **errp);
 

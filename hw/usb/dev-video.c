@@ -5,6 +5,7 @@
  * Copyright 2021 Bytedance, Inc.
  *
  * Authors:
+ *   David Milosevic <david.milosevic@9elements.com>
  *   Marcello Sylvester Bauer <marcello.bauer@9elements.com>
  *   zhenwei pi <pizhenwei@bytedance.com>
  *
@@ -12,6 +13,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "hw/usb.h"
 #include "hw/usb/video.h"
 #include "hw/qdev-properties.h"
@@ -22,10 +24,42 @@
 #include "desc.h"
 #include "trace.h"
 
+enum AttributeIndex {
+    ATTRIBUTE_DEF,
+    ATTRIBUTE_MIN,
+    ATTRIBUTE_MAX,
+    ATTRIBUTE_CUR,
+    ATTRIBUTE_RES,
+    ATTRIBUTE_ALL
+};
+
+typedef struct USBVideoControlStats {
+    VideoControlStatus status;
+    uint8_t size; /* value size in bytes */
+    QTAILQ_ENTRY(USBVideoControlStats) list;
+} USBVideoControlStats;
+
+typedef struct USBVideoControlInfo {
+    uint8_t selector;
+    uint8_t caps;
+    uint8_t size;
+    uint32_t value[ATTRIBUTE_ALL]; /* stored in le32 */
+} USBVideoControlInfo;
+
 struct USBVideoState {
     /* qemu interfaces */
     USBDevice dev;
     Videodev *video;
+
+    /* UVC control */
+    uint8_t error;
+    USBVideoControlInfo pu_attrs[PU_MAX];
+    QTAILQ_HEAD(, USBVideoControlStats) control_status;
+
+    /* video streaming control */
+    uint8_t vsc_info;
+    uint16_t vsc_len;
+    VideoStreamingControl vsc_attrs[ATTRIBUTE_ALL];
 };
 
 #define TYPE_USB_VIDEO "usb-video"
@@ -49,6 +83,11 @@ OBJECT_DECLARE_SIMPLE_TYPE(USBVideoState, USB_VIDEO)
 /* Alternate Settings */
 #define ALTSET_OFF       0x0
 #define ALTSET_STREAMING 0x1
+
+/* XU IDs */
+#define SELECTOR_UNIT   0x4
+#define PROCESSING_UNIT 0x5
+#define ENCODING_UNIT   0x6
 
 enum usb_video_strings {
     STR_NULL,
@@ -78,6 +117,70 @@ static const USBDescStrings usb_video_stringtable = {
 #define U16(x) ((x) & 0xff), (((x) >> 8) & 0xff)
 #define U24(x) U16(x), (((x) >> 16) & 0xff)
 #define U32(x) U24(x), (((x) >> 24) & 0xff)
+
+#define REQ_TO_ATTR(req, idx)  \
+    switch (req) {             \
+    case SET_CUR:              \
+    case GET_CUR:              \
+        idx = ATTRIBUTE_CUR;   \
+        break;                 \
+    case GET_MIN:              \
+        idx = ATTRIBUTE_MIN;   \
+        break;                 \
+    case GET_MAX:              \
+        idx = ATTRIBUTE_MAX;   \
+        break;                 \
+    case GET_RES:              \
+        idx = ATTRIBUTE_RES;   \
+        break;                 \
+    case GET_DEF:              \
+        idx = ATTRIBUTE_DEF;   \
+        break;                 \
+    default:                   \
+        idx = -1;              \
+        break;                 \
+    }
+
+#define handle_get_control(attrs, req, cs, length, data, ret)                \
+    do {                                                                     \
+        if (!attrs[cs].selector) {                                           \
+            break;                                                           \
+        }                                                                    \
+        if ((req == GET_INFO) && (length >= 1)) {                            \
+            *((uint8_t *)data) = attrs[cs].caps;                             \
+            ret = 1;                                                         \
+        } else if ((req == GET_LEN) && (length >= 2)) {                      \
+            *((uint16_t *)data) = cpu_to_le16(attrs[cs].size);               \
+            ret = 2;                                                         \
+        } else {                                                             \
+            int idx = -1;                                                    \
+            int len = MIN(length, sizeof(attrs[cs].size));                   \
+            REQ_TO_ATTR(req, idx);                                           \
+            if (idx >= 0) {                                                  \
+                memcpy(data, &attrs[cs].value[idx], len);                    \
+                ret = length;                                                \
+            }                                                                \
+        }                                                                    \
+    } while (0)
+
+#define handle_get_streaming(s, req, cs, length, data, ret)                  \
+    do {                                                                     \
+        if ((req == GET_INFO) && (length >= 1)) {                            \
+            *((uint8_t *)data) = s->cs##_len;                                \
+            ret = 1;                                                         \
+        } else if ((req == GET_LEN) && (length >= 2)) {                      \
+            *((uint16_t *)data) = cpu_to_le16(s->cs##_len);                  \
+            ret = 2;                                                         \
+        } else {                                                             \
+            int idx = -1;                                                    \
+            int len = MIN(length, sizeof(s->cs##_attrs[0]));                 \
+            REQ_TO_ATTR(req, idx);                                           \
+            if (idx >= 0) {                                                  \
+                memcpy(data, s->cs##_attrs + idx, len);                      \
+                ret = length;                                                \
+            }                                                                \
+        }                                                                    \
+    } while (0)
 
 static const USBDescIfaceAssoc desc_if_groups[] = {
     {
@@ -319,7 +422,7 @@ static void usb_video_parse_vs_desc(USBVideoState *s, USBDescIface *iface)
     iface->descs = g_new0(USBDescOther, iface->ndesc);
 
     // parse all formats
-    for (i = 0;i < s->video->nmode; i++) {
+    for (i = 0; i < s->video->nmode; i++) {
         usb_video_parse_vs_format(iface, &s->video->modes[i], i + 1, &len);
     }
 
@@ -422,6 +525,7 @@ static void usb_video_desc_free(USBDevice *dev)
     const USBDesc *d = dev->usb_desc;
     g_free((void *)d->full->confs->ifs);
     g_free((void *)d->full->confs);
+    // todo: g_free((void *)d->high->confs->ifs);
     g_free((void *)d->high->confs);
     g_free((void *)d->super->confs);
     g_free((void *)d->full);
@@ -431,6 +535,52 @@ static void usb_video_desc_free(USBDevice *dev)
     dev->usb_desc = NULL;
 }
 
+static VideodevControlType usb_video_pu_control_type_to_qemu(uint8_t cs)
+{
+    switch (cs) {
+    case PU_BRIGHTNESS_CONTROL:
+        return VideodevBrightness;
+    case PU_CONTRAST_CONTROL:
+        return VideodevContrast;
+    case PU_GAIN_CONTROL:
+        return VideodevGain;
+    case PU_GAMMA_CONTROL:
+        return VideodevGamma;
+    case PU_HUE_CONTROL:
+        return VideodevHue;
+    case PU_HUE_AUTO_CONTROL:
+        return VideodevHueAuto;
+    case PU_SATURATION_CONTROL:
+        return VideodevSaturation;
+    case PU_SHARPNESS_CONTROL:
+        return VideodevSharpness;
+    case PU_WHITE_BALANCE_TEMPERATURE_CONTROL:
+        return VideodevWhiteBalanceTemperature;
+    }
+
+    return VideodevControlMax;
+}
+
+static uint32_t usb_video_vsfmt_to_pixfmt(const uint8_t *data)
+{
+    uint8_t bDescriptorSubtype = data[2];
+    uint32_t pixfmt = 0;
+
+    switch (bDescriptorSubtype) {
+    case VS_FORMAT_MJPEG:
+        return QEMU_VIDEO_PIX_FMT_MJPEG;
+
+    case VS_FORMAT_UNCOMPRESSED:
+        pixfmt = *(uint32_t *)(data + 5);
+        if (pixfmt == fourcc_code('Y', 'U', 'Y', '2')) {
+            return QEMU_VIDEO_PIX_FMT_YUYV;
+        } else if (pixfmt == fourcc_code('R', 'G', 'B', 'P')) {
+            return QEMU_VIDEO_PIX_FMT_RGB565;
+        }
+    }
+
+    return 0;
+}
 
 static void usb_video_handle_data_control_in(USBDevice *dev, USBPacket *p)
 {
@@ -452,6 +602,70 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
     p->status = USB_RET_STALL;
 }
 
+static uint32_t usb_video_get_max_framesize(Videodev *video)
+{
+    uint32_t max_framesize = 0;
+
+    for (int i = 0; i < video->nmode; i++) {
+
+        VideoMode *mode = &video->modes[i];
+
+        for (int j = 0; j < mode->nframesize; j++) {
+
+            const uint32_t height = mode->framesizes[j].height;
+            const uint32_t width  = mode->framesizes[j].width;
+
+            if (height * width * 2 > max_framesize)
+                max_framesize = height * width * 2;
+        }
+    }
+
+    return max_framesize;
+}
+
+static int usb_video_initialize(USBDevice *dev)
+{
+    USBVideoState *s = USB_VIDEO(dev);
+    VideoStreamingControl *vsc;
+
+    /*
+     * build USB descriptors
+     * */
+
+    usb_video_desc_new(dev);
+    usb_desc_create_serial(dev);
+    usb_desc_init(dev);
+
+    /*
+     * initialize processing unit attributes
+     * */
+
+    // todo
+
+    /*
+     * initialize video streaming control attributes
+     * */
+
+    s->vsc_info = 0;
+    s->vsc_len  = sizeof(VideoStreamingControl);
+
+    vsc = &s->vsc_attrs[ATTRIBUTE_DEF];
+
+    vsc->bFormatIndex             = 1;
+    vsc->bFrameIndex              = 1;
+    vsc->dwFrameInterval          = cpu_to_le32(1000000); // default 10 FPS
+    vsc->wDelay                   = cpu_to_le16(32);
+    vsc->dwMaxVideoFrameSize      = cpu_to_le32(usb_video_get_max_framesize(s->video));
+    vsc->dwMaxPayloadTransferSize = cpu_to_le32(1024);
+    vsc->dwClockFrequency         = cpu_to_le32(15000000);
+
+    memcpy(&s->vsc_attrs[ATTRIBUTE_CUR], vsc, sizeof(VideoStreamingControl));
+    memcpy(&s->vsc_attrs[ATTRIBUTE_MIN], vsc, sizeof(VideoStreamingControl));
+    memcpy(&s->vsc_attrs[ATTRIBUTE_MAX], vsc, sizeof(VideoStreamingControl));
+
+    return 0;
+}
+
 static void usb_video_realize(USBDevice *dev, Error **errp)
 {
     USBBus *bus = usb_bus_from_device(dev);
@@ -464,10 +678,15 @@ static void usb_video_realize(USBDevice *dev, Error **errp)
         return;
     }
 
-    usb_video_desc_new(dev);
-    usb_desc_create_serial(dev);
-    usb_desc_init(dev);
+    if (usb_video_initialize(dev) < 0) {
+        error_setg(errp, "%s: Could not initialize USB video", TYPE_USB_VIDEO);
+        return;
+    }
+
+    QTAILQ_INIT(&s->control_status);
+
     s->dev.opaque = s;
+    s->error = 0;
 }
 
 static void usb_video_handle_reset(USBDevice *dev)
@@ -477,6 +696,257 @@ static void usb_video_handle_reset(USBDevice *dev)
     trace_usb_video_handle_reset(bus->busnr, dev->addr);
 }
 
+static void usb_video_queue_control_status(USBDevice *dev, uint8_t bOriginator,
+                                           uint8_t bSelector, uint32_t *value, uint8_t size)
+{
+    USBVideoState *s = USB_VIDEO(dev);
+    // USBBus *bus = usb_bus_from_device(dev);
+    USBVideoControlStats *usb_status;
+    VideoControlStatus *status;
+
+    usb_status = g_malloc0(sizeof(USBVideoControlStats));
+    usb_status->size = size;
+    status = &usb_status->status;
+    status->bStatusType = STATUS_INTERRUPT_CONTROL;
+    status->bOriginator = bOriginator;
+    status->bEvent = 0;
+    status->bSelector = bSelector;
+    status->bAttribute = STATUS_CONTROL_VALUE_CHANGE;
+    memcpy(status->bValue, value, size);
+
+    QTAILQ_INSERT_TAIL(&s->control_status, usb_status, list);
+    // trace_usb_video_queue_control_status(bus->busnr, dev->addr, bOriginator,
+    //                                      bSelector, *value, size);
+}
+
+
+static int usb_video_set_vs_control(USBDevice *dev, uint8_t req, int length, uint8_t *data)
+{
+    USBVideoState *s = USB_VIDEO(dev);
+    int idx = -1;
+    int ret = USB_RET_STALL;
+
+    REQ_TO_ATTR(req, idx);
+    if ((idx >= 0) && (length <= sizeof(s->vsc_attrs[0]))) {
+        VideoStreamingControl *dst = s->vsc_attrs + idx;
+        VideoStreamingControl *src = (VideoStreamingControl *)data;
+
+        dst->bFormatIndex = src->bFormatIndex;
+        dst->bFrameIndex = src->bFrameIndex;
+        VIDEO_CONTROL_TEST_AND_SET(src->bmHint, dwFrameInterval, src, dst);
+        VIDEO_CONTROL_TEST_AND_SET(src->bmHint, wKeyFrameRate, src, dst);
+        VIDEO_CONTROL_TEST_AND_SET(src->bmHint, wPFrameRate, src, dst);
+        VIDEO_CONTROL_TEST_AND_SET(src->bmHint, wCompQuality, src, dst);
+        VIDEO_CONTROL_TEST_AND_SET(src->bmHint, wCompWindowSize, src, dst);
+        ret = length;
+    }
+
+    return ret;
+}
+
+static int usb_video_get_frmi_from_vsc(USBDevice *dev,
+                                       VideoStreamingControl *vsc,
+                                       VideoFrameInterval *frmi)
+{
+    const USBDesc *desc = usb_device_get_usb_desc(dev);
+    const USBDescIface *vs_iface = &desc->full->confs->ifs[VS0];
+    USBDescOther *usb_desc;
+    uint32_t pixfmt = 0;
+    uint16_t width = 0, height = 0;
+    uint8_t bDescriptorSubtype;
+    uint8_t index;
+
+    /* 1, search bFormatIndex */
+    for (index = 0; index < vs_iface->ndesc; index++) {
+        usb_desc = vs_iface->descs + index;
+        if (usb_desc->data[0] < 4) {
+            return -ENODEV;
+        }
+
+        bDescriptorSubtype = usb_desc->data[2];
+        if ((bDescriptorSubtype == VS_FORMAT_MJPEG)
+           || (bDescriptorSubtype == VS_FORMAT_UNCOMPRESSED)) {
+            if (usb_desc->data[3] == vsc->bFormatIndex) {
+                pixfmt = usb_video_vsfmt_to_pixfmt(usb_desc->data);
+                break;
+            }
+        }
+    }
+
+    /* 2, search bFormatIndex */
+    for (index++ ; pixfmt && index < vs_iface->ndesc; index++) {
+        usb_desc = vs_iface->descs + index;
+        if (usb_desc->data[0] < 4) {
+            return -ENODEV;
+        }
+
+        bDescriptorSubtype = usb_desc->data[2];
+        if ((bDescriptorSubtype == VS_FRAME_MJPEG)
+           || (bDescriptorSubtype == VS_FRAME_UNCOMPRESSED)) {
+            if (usb_desc->data[3] == vsc->bFrameIndex) {
+                /* see Class-specific VS Frame Descriptor */
+                width = le16_to_cpu(*(uint16_t *)(usb_desc->data + 5));
+                height = le16_to_cpu(*(uint16_t *)(usb_desc->data + 7));
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if (pixfmt && width && height) {
+
+        frmi->pixel_format = pixfmt;
+        frmi->width = width;
+        frmi->height = height;
+        frmi->type = VIDEO_FRMIVAL_TYPE_DISCRETE;
+        frmi->d.numerator = 30; /* prime number 2 * 3 * 5 */
+        frmi->d.denominator = frmi->d.numerator * 10000000 / le32_to_cpu(vsc->dwFrameInterval);
+
+        return 0;
+    }
+
+    return -ENODEV;
+}
+
+static int usb_video_get_control(USBDevice *dev, int request, int value,
+                                 int index, int length, uint8_t *data)
+{
+    USBVideoState *s = USB_VIDEO(dev);
+    uint8_t req = request & 0xff;
+    uint8_t cs = value >> 8;
+    uint8_t intfnum = index & 0xff;
+    uint8_t unit = index >> 8;
+    int ret = USB_RET_STALL;
+
+    switch (intfnum) {
+    case IF_CONTROL:
+        switch (unit) {
+        case 0:
+            if (length != 1) {
+                break;
+            }
+
+            if (cs == VC_VIDEO_POWER_MODE_CONTROL) {
+                data[0] = 127; /* 4.2.1.1 Power Mode Control */
+                ret = 1;
+            } else if (cs == VC_REQUEST_ERROR_CODE_CONTROL) {
+                data[0] = s->error; /* 4.2.1.2 Request Error Code Control */
+                s->error = 0;
+                ret = 1;
+            }
+            break;
+
+        case PROCESSING_UNIT:
+            {
+                VideodevControlType t = usb_video_pu_control_type_to_qemu(cs);
+                handle_get_control(s->pu_attrs, req, t, length, data, ret);
+            }
+            break;
+
+        case SELECTOR_UNIT:
+        case ENCODING_UNIT:
+        default:
+            /* TODO XU control support */
+            break;
+        }
+        break;
+
+    case IF_STREAMING:
+        switch (cs) {
+        case VS_PROBE_CONTROL:
+            handle_get_streaming(s, req, vsc, length, data, ret);
+            break;
+
+        default:
+            qemu_log_mask(LOG_UNIMP, "%s: get streamimg %d not implemented\n",
+                          TYPE_USB_VIDEO, cs);
+        }
+
+        break;
+    }
+
+    // trace_usb_video_get_control(bus->busnr, dev->addr, intfnum, unit, cs, ret);
+    return ret;
+}
+
+static int usb_video_set_control(USBDevice *dev, int request, int value,
+                                 int index, int length, uint8_t *data)
+{
+    USBVideoState *s = USB_VIDEO(dev);
+    // USBBus *bus = usb_bus_from_device(dev);
+    uint8_t req = request & 0xff;
+    uint8_t cs = value >> 8;
+    uint8_t intfnum = index & 0xff;
+    uint8_t unit = index >> 8;
+    int ret = USB_RET_STALL;
+
+    switch (intfnum) {
+    case IF_CONTROL:
+        switch (unit) {
+        case PROCESSING_UNIT:
+            {
+                uint32_t val = 0;
+                VideodevControl ctrl;
+                VideodevControlType type;
+                Error *local_err = NULL;
+
+                type = usb_video_pu_control_type_to_qemu(cs);
+                if (type == VideodevControlMax) {
+                    break;
+                }
+
+                if (length > 4) {
+                    break;
+                }
+
+                memcpy(&val, data, length);
+                val = le32_to_cpu(val);
+                ctrl.type = type;
+                ctrl.cur = val;
+                if (qemu_videodev_set_control(s->video, &ctrl, &local_err)) {
+                    error_reportf_err(local_err, "%s: ", TYPE_USB_VIDEO);
+                    break;
+                }
+
+                memcpy(&s->pu_attrs[type].value[ATTRIBUTE_CUR], data, length);
+                ret = length;
+                usb_video_queue_control_status(dev, PROCESSING_UNIT, cs,
+                                               &val, length);
+            }
+            break;
+
+        /* TODO XU control support */
+        }
+
+        break;
+
+    case IF_STREAMING:
+        switch (cs) {
+        case VS_PROBE_CONTROL:
+        case VS_COMMIT_CONTROL:
+            {
+                VideoFrameInterval frmi; // todo: why frmi unused?
+                if (usb_video_get_frmi_from_vsc(dev, (VideoStreamingControl *)data, &frmi)) {
+                    s->error = VC_ERROR_OUT_OF_RANGE;
+                    break;
+                }
+
+                ret = usb_video_set_vs_control(dev, req, length, data);
+            }
+            break;
+
+        default:
+            qemu_log_mask(LOG_UNIMP, "%s: set streamimg %d not implemented\n",
+                          TYPE_USB_VIDEO, cs);
+        }
+
+        break;
+    }
+
+    // trace_usb_video_set_control(bus->busnr, dev->addr, intfnum, cs, ret);
+    return ret;
+}
 
 static void usb_video_handle_control(USBDevice *dev, USBPacket *p,
                                     int request, int value, int index,
@@ -493,9 +963,38 @@ static void usb_video_handle_control(USBDevice *dev, USBPacket *p,
     }
 
     switch (request) {
+    case ClassInterfaceRequest | GET_CUR:
+    case ClassInterfaceRequest | GET_MIN:
+    case ClassInterfaceRequest | GET_MAX:
+    case ClassInterfaceRequest | GET_RES:
+    case ClassInterfaceRequest | GET_LEN:
+    case ClassInterfaceRequest | GET_INFO:
+    case ClassInterfaceRequest | GET_DEF:
+        ret = usb_video_get_control(dev, request, value, index, length, data);
+        if (ret < 0) {
+            goto error;
+        }
+        break;
+    case ClassInterfaceOutRequest | SET_CUR:
+        ret = usb_video_set_control(dev, request, value, index, length, data);
+        if (ret < 0) {
+            goto error;
+        }
+        break;
+    case ClassInterfaceRequest | GET_CUR_ALL:
+    case ClassInterfaceRequest | GET_MIN_ALL:
+    case ClassInterfaceRequest | GET_MAX_ALL:
+    case ClassInterfaceRequest | GET_RES_ALL:
+    case ClassInterfaceRequest | GET_DEF_ALL:
+    case ClassInterfaceOutRequest | SET_CUR_ALL:
     default:
+        qemu_log_mask(LOG_UNIMP, "%s: request %d not implemented\n",
+                      TYPE_USB_VIDEO, request);
         goto error;
     }
+
+    p->actual_length = ret;
+    p->status = USB_RET_SUCCESS;
 
     return;
 

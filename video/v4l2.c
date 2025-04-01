@@ -28,6 +28,42 @@ typedef struct V4l2Videodev V4l2Videodev;
 
 DECLARE_INSTANCE_CHECKER(V4l2Videodev, V4L2_VIDEODEV, TYPE_VIDEODEV_V4L2)
 
+typedef struct VideoV4l2Ctrl {
+    VideodevControlType q;
+    uint32_t v;
+} VideoV4l2Ctrl;
+
+static VideoV4l2Ctrl video_v4l2_ctrl_table[] = {
+    { .q = VideodevBrightness,
+      .v = V4L2_CID_BRIGHTNESS },
+    { .q = VideodevContrast,
+      .v = V4L2_CID_CONTRAST },
+    { .q = VideodevGain,
+      .v = V4L2_CID_GAIN },
+    { .q = VideodevGamma,
+      .v = V4L2_CID_GAMMA },
+    { .q = VideodevHue,
+      .v = V4L2_CID_HUE },
+    { .q = VideodevHueAuto,
+      .v = V4L2_CID_HUE_AUTO },
+    { .q = VideodevSaturation,
+      .v = V4L2_CID_SATURATION },
+    { .q = VideodevSharpness,
+      .v = V4L2_CID_SHARPNESS },
+    { .q = VideodevWhiteBalanceTemperature,
+      .v = V4L2_CID_WHITE_BALANCE_TEMPERATURE },
+};
+
+static uint32_t video_qemu_control_to_v4l2(VideodevControlType type)
+{
+    for (int i = 0; i < ARRAY_SIZE(video_v4l2_ctrl_table); i++) {
+        if (video_v4l2_ctrl_table[i].q == type)
+            return video_v4l2_ctrl_table[i].v;
+    }
+
+    return 0;
+}
+
 static void video_v4l2_parse(Videodev *vd, QemuOpts *opts, Error **errp)
 {
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
@@ -78,7 +114,6 @@ static void video_v4l2_open(Videodev *vd, Error **errp)
         goto close;
     }
 
-    /* todo: allow custom value for this setting */
     vv->nbuffers = V4L2_BUFFER_DFL;
     return;
 
@@ -203,7 +238,29 @@ static int video_v4l2_set_mode(Videodev *vd, Error **errp)
         return -1;
     }
 
-    /* TODO: print applied video format */
+    return 0;
+}
+
+static int video_v4l2_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
+{
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    struct v4l2_control v4l2_ctrl;
+    uint32_t cid;
+
+    cid = video_qemu_control_to_v4l2(ctrl->type);
+    if (!cid) {
+        error_setg(errp, "unsupported control type %d", ctrl->type);
+        return -EINVAL;
+    }
+
+    v4l2_ctrl.id = cid;
+    v4l2_ctrl.value = ctrl->cur;
+
+    if (ioctl(vv->fd, VIDIOC_S_CTRL, &v4l2_ctrl) < 0) {
+        error_setg(errp, "VIDIOC_S_CTRL on %s failed: %s", vv->device_path, strerror(errno));
+        return -errno;
+    }
+
     return 0;
 }
 
@@ -376,6 +433,7 @@ static void video_v4l2_class_init(ObjectClass *oc, void *data)
     vc->close = video_v4l2_close;
     vc->enum_modes = video_v4l2_enum_modes;
     vc->set_mode = video_v4l2_set_mode;
+    vc->set_control = video_v4l2_set_control;
     vc->stream_on = video_v4l2_stream_on;
     vc->stream_off = video_v4l2_stream_off;
 }
