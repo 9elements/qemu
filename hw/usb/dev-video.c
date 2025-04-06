@@ -52,6 +52,7 @@ struct USBVideoState {
     Videodev *video;
 
     /* UVC control */
+    int altset;
     uint8_t error;
     USBVideoControlInfo pu_attrs[PU_MAX];
     QTAILQ_HEAD(, USBVideoControlStats) control_status;
@@ -259,7 +260,7 @@ static const USBDescEndpoint vs_iface_eps[] = {
 #define VS_FRAME_MIN_LEN 0x1a
 #define VS_FRAME_SIZE(n)  (VS_FRAME_MIN_LEN+4*(n))
 
-static void usb_video_parse_vs_header(USBDescOther *header, uint16_t wTotalLength)
+static void usb_video_add_vs_header(USBDescOther *header, uint16_t wTotalLength)
 {
     uint8_t *data;
     /* Class-specific VS Header Descriptor (Input) */
@@ -296,7 +297,7 @@ static uint8_t usb_video_pixfmt_to_vsfmt(uint32_t pixfmt)
     return VS_UNDEFINED;
 }
 
-static void usb_video_parse_vs_frame(USBDescIface *iface, VideoFramesize *frmsz, int frame_index, int *len)
+static void usb_video_add_vs_frame(USBDescIface *iface, VideoFramesize *frmsz, int frame_index, int *len)
 {
     USBDescOther *desc;
     uint8_t *data, bLength = VS_FRAME_SIZE(frmsz->nframerate);
@@ -344,7 +345,7 @@ static void usb_video_parse_vs_frame(USBDescIface *iface, VideoFramesize *frmsz,
     }
 }
 
-static void usb_video_parse_vs_format(USBDescIface *iface, VideoMode *mode, int format_index, int *len)
+static void usb_video_add_vs_format(USBDescIface *iface, VideoMode *mode, int format_index, int *len)
 {
     int i;
     USBDescOther *desc;
@@ -407,10 +408,10 @@ static void usb_video_parse_vs_format(USBDescIface *iface, VideoMode *mode, int 
     *len += desc->length;
 
     for (i = 0; i < bNumFrameDescriptors; i++)
-        usb_video_parse_vs_frame(iface, &mode->framesizes[i], i + 1, len);
+        usb_video_add_vs_frame(iface, &mode->framesizes[i], i + 1, len);
 }
 
-static void usb_video_parse_vs_desc(USBVideoState *s, USBDescIface *iface)
+static void usb_video_add_vs_desc(USBVideoState *s, USBDescIface *iface)
 {
     int i, len;
 
@@ -425,10 +426,10 @@ static void usb_video_parse_vs_desc(USBVideoState *s, USBDescIface *iface)
 
     // parse all formats
     for (i = 0; i < s->video->nmode; i++) {
-        usb_video_parse_vs_format(iface, &s->video->modes[i], i + 1, &len);
+        usb_video_add_vs_format(iface, &s->video->modes[i], i + 1, &len);
     }
 
-    usb_video_parse_vs_header(&iface->descs[0], len);
+    usb_video_add_vs_header(&iface->descs[0], len);
 }
 
 enum video_desc_iface_idx {
@@ -472,7 +473,7 @@ static const USBDescIface *usb_video_desc_iface_new(USBDevice *dev)
     d[VS1].bNumEndpoints      = ARRAY_SIZE(vs_iface_eps);
     d[VS1].eps                = (USBDescEndpoint *)vs_iface_eps;
 
-    usb_video_parse_vs_desc(s, &d[VS0]);
+    usb_video_add_vs_desc(s, &d[VS0]);
 
     return d;
 }
@@ -527,7 +528,7 @@ static void usb_video_desc_free(USBDevice *dev)
     const USBDesc *d = dev->usb_desc;
     g_free((void *)d->full->confs->ifs);
     g_free((void *)d->full->confs);
-    // todo: g_free((void *)d->high->confs->ifs);
+    g_free((void *)d->high->confs->ifs);
     g_free((void *)d->high->confs);
     g_free((void *)d->super->confs);
     g_free((void *)d->full);
@@ -667,7 +668,8 @@ static void usb_video_realize(USBDevice *dev, Error **errp)
     QTAILQ_INIT(&s->control_status);
 
     s->dev.opaque = s;
-    s->error = 0;
+    s->altset     = ALTSET_OFF;
+    s->error      = 0;
 }
 
 static void usb_video_handle_reset(USBDevice *dev)
@@ -940,12 +942,57 @@ static void usb_video_handle_data(USBDevice *dev, USBPacket *p)
     p->status = USB_RET_STALL;
 }
 
+static void usb_video_set_streaming_altset(USBDevice *dev, int altset)
+{
+    USBVideoState *s = USB_VIDEO(dev);
+    Error *local_err = NULL;
+
+    if (s->altset == altset)
+        return;
+
+    switch (altset) {
+    case ALTSET_OFF:
+        {
+            if (qemu_videodev_stream_off(s->video, &local_err) != 0) {
+
+                s->error = VC_ERROR_INVALID_REQUEST;
+                error_reportf_err(local_err, "%s: ", TYPE_USB_VIDEO);
+                return;
+            }
+        }
+        break;
+
+    case ALTSET_STREAMING:
+        {
+            VideoStreamingControl *vsc = (VideoStreamingControl*) &s->vsc_attrs[ATTRIBUTE_CUR];
+
+            VideoStreamOptions opts = {
+                .bFormatIndex    = vsc->bFormatIndex,
+                .bFrameIndex     = vsc->bFrameIndex,
+                .dwFrameInterval = le32_to_cpu(vsc->dwFrameInterval)
+            };
+
+            if (qemu_videodev_stream_on(s->video, &opts, &local_err) != 0) {
+
+                s->error = VC_ERROR_INVALID_REQUEST;
+                error_reportf_err(local_err, "%s: ", TYPE_USB_VIDEO);
+                return;
+            }
+        }
+        break;
+    }
+
+    s->altset = altset;
+}
+
 static void usb_video_set_interface(USBDevice *dev, int iface,
                                     int old, int value)
 {
     USBBus *bus = usb_bus_from_device(dev);
-
     trace_usb_video_set_interface(bus->busnr, dev->addr, iface, value);
+
+    if (iface == IF_STREAMING)
+        usb_video_set_streaming_altset(dev, value);
 }
 
 static void usb_video_unrealize(USBDevice *dev)
