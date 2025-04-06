@@ -185,20 +185,6 @@ int qemu_videodev_delete(Videodev *vd, Error **errp) {
     return 0;
 }
 
-int qemu_videodev_set_mode(Videodev *vd, Error **errp) {
-
-    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
-
-    if (vc->set_mode == NULL) {
-
-        error_setg(errp, "%s: %s missing 'set_mode' implementation!",
-                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
-        return -ENOTSUP;
-    }
-
-    return vc->set_mode(vd, errp);
-}
-
 int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp) {
 
     VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
@@ -213,9 +199,47 @@ int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
     return vc->set_control(vd, ctrl, errp);
 }
 
-int qemu_videodev_stream_on(Videodev *vd, Error **errp) {
+bool qemu_videodev_check_options(Videodev *vd, VideoStreamOptions *opts) {
+
+    const uint8_t format_index = opts->bFormatIndex - 1;
+    const uint8_t frame_index  = opts->bFrameIndex - 1;
+
+    if (format_index >= vd->nmode)
+        return false;
+
+    if (frame_index >= vd->modes[format_index].nframesize)
+        return false;
+
+    return true;
+}
+
+// @private
+static int qemu_videodev_select_options(Videodev *vd, VideoStreamOptions *opts) {
+
+    const uint8_t format_index = opts->bFormatIndex - 1;
+    const uint8_t frame_index  = opts->bFrameIndex - 1;
+
+    if (qemu_videodev_check_options(vd, opts) == false)
+        return -1;
+
+    vd->selected.mode  = &vd->modes[format_index];
+    vd->selected.frmsz = &vd->modes[format_index].framesizes[frame_index];
+
+    vd->selected.frmrt.numerator   = 30; // prime number (2 * 3 * 5)
+    vd->selected.frmrt.denominator = 30 * 10000000 / opts->dwFrameInterval;
+
+    return 0;
+}
+
+int qemu_videodev_stream_on(Videodev *vd, VideoStreamOptions *opts, Error **errp) {
 
     VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+
+    if (qemu_videodev_select_options(vd, opts) < 0) {
+
+        error_setg(errp, "%s: Failed to select options - Invalid mode/framesize", TYPE_VIDEODEV);
+        return -ENOTSUP;
+    }
 
     if (vc->stream_on == NULL) {
 

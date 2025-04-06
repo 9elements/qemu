@@ -256,7 +256,6 @@ static const USBDescEndpoint vs_iface_eps[] = {
 
 #define VS_HEADER_LEN                  0xe
 #define VS_FORMAT_UNCOMPRESSED_LEN     0x1b
-#define VS_FORMAT_MJPEG_LEN            0xb
 #define VS_FRAME_MIN_LEN 0x1a
 #define VS_FRAME_SIZE(n)  (VS_FRAME_MIN_LEN+4*(n))
 
@@ -297,7 +296,7 @@ static uint8_t usb_video_pixfmt_to_vsfmt(uint32_t pixfmt)
     return VS_UNDEFINED;
 }
 
-static void usb_video_parse_vs_frame(USBDescIface *iface, VideoFramesize * frmsz, int frame_index, int *len)
+static void usb_video_parse_vs_frame(USBDescIface *iface, VideoFramesize *frmsz, int frame_index, int *len)
 {
     USBDescOther *desc;
     uint8_t *data, bLength = VS_FRAME_SIZE(frmsz->nframerate);
@@ -407,9 +406,8 @@ static void usb_video_parse_vs_format(USBDescIface *iface, VideoMode *mode, int 
     desc->data = data;
     *len += desc->length;
 
-    for (i = 0; i < bNumFrameDescriptors; i++) {
+    for (i = 0; i < bNumFrameDescriptors; i++)
         usb_video_parse_vs_frame(iface, &mode->framesizes[i], i + 1, len);
-    }
 }
 
 static void usb_video_parse_vs_desc(USBVideoState *s, USBDescIface *iface)
@@ -563,27 +561,6 @@ static VideodevControlType usb_video_pu_control_type_to_qemu(uint8_t cs)
     }
 
     return VideodevControlMax;
-}
-
-static uint32_t usb_video_vsfmt_to_pixfmt(const uint8_t *data)
-{
-    uint8_t bDescriptorSubtype = data[2];
-    uint32_t pixfmt = 0;
-
-    switch (bDescriptorSubtype) {
-    case VS_FORMAT_MJPEG:
-        return QEMU_VIDEO_PIX_FMT_MJPEG;
-
-    case VS_FORMAT_UNCOMPRESSED:
-        pixfmt = *(uint32_t *)(data + 5);
-        if (pixfmt == fourcc_code('Y', 'U', 'Y', '2')) {
-            return QEMU_VIDEO_PIX_FMT_YUYV;
-        } else if (pixfmt == fourcc_code('R', 'G', 'B', 'P')) {
-            return QEMU_VIDEO_PIX_FMT_RGB565;
-        }
-    }
-
-    return 0;
 }
 
 static void usb_video_handle_data_control_in(USBDevice *dev, USBPacket *p)
@@ -748,71 +725,6 @@ static int usb_video_set_vs_control(USBDevice *dev, uint8_t req, int length, uin
     return ret;
 }
 
-static int usb_video_get_frmi_from_vsc(USBDevice *dev,
-                                       VideoStreamingControl *vsc,
-                                       VideoFrameInterval *frmi)
-{
-    const USBDesc *desc = usb_device_get_usb_desc(dev);
-    const USBDescIface *vs_iface = &desc->full->confs->ifs[VS0];
-    USBDescOther *usb_desc;
-    uint32_t pixfmt = 0;
-    uint16_t width = 0, height = 0;
-    uint8_t bDescriptorSubtype;
-    uint8_t index;
-
-    /* 1, search bFormatIndex */
-    for (index = 0; index < vs_iface->ndesc; index++) {
-        usb_desc = vs_iface->descs + index;
-        if (usb_desc->data[0] < 4) {
-            return -ENODEV;
-        }
-
-        bDescriptorSubtype = usb_desc->data[2];
-        if ((bDescriptorSubtype == VS_FORMAT_MJPEG)
-           || (bDescriptorSubtype == VS_FORMAT_UNCOMPRESSED)) {
-            if (usb_desc->data[3] == vsc->bFormatIndex) {
-                pixfmt = usb_video_vsfmt_to_pixfmt(usb_desc->data);
-                break;
-            }
-        }
-    }
-
-    /* 2, search bFormatIndex */
-    for (index++ ; pixfmt && index < vs_iface->ndesc; index++) {
-        usb_desc = vs_iface->descs + index;
-        if (usb_desc->data[0] < 4) {
-            return -ENODEV;
-        }
-
-        bDescriptorSubtype = usb_desc->data[2];
-        if ((bDescriptorSubtype == VS_FRAME_MJPEG)
-           || (bDescriptorSubtype == VS_FRAME_UNCOMPRESSED)) {
-            if (usb_desc->data[3] == vsc->bFrameIndex) {
-                /* see Class-specific VS Frame Descriptor */
-                width = le16_to_cpu(*(uint16_t *)(usb_desc->data + 5));
-                height = le16_to_cpu(*(uint16_t *)(usb_desc->data + 7));
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-
-    if (pixfmt && width && height) {
-
-        frmi->pixel_format = pixfmt;
-        frmi->width = width;
-        frmi->height = height;
-        frmi->type = VIDEO_FRMIVAL_TYPE_DISCRETE;
-        frmi->d.numerator = 30; /* prime number 2 * 3 * 5 */
-        frmi->d.denominator = frmi->d.numerator * 10000000 / le32_to_cpu(vsc->dwFrameInterval);
-
-        return 0;
-    }
-
-    return -ENODEV;
-}
-
 static int usb_video_get_control(USBDevice *dev, int request, int value,
                                  int index, int length, uint8_t *data)
 {
@@ -930,8 +842,15 @@ static int usb_video_set_control(USBDevice *dev, int request, int value,
         case VS_PROBE_CONTROL:
         case VS_COMMIT_CONTROL:
             {
-                VideoFrameInterval frmi; // todo: why frmi unused?
-                if (usb_video_get_frmi_from_vsc(dev, (VideoStreamingControl *)data, &frmi)) {
+                VideoStreamingControl *vsc = (VideoStreamingControl*) data;
+
+                VideoStreamOptions opts = {
+                    .bFormatIndex    = vsc->bFormatIndex,
+                    .bFrameIndex     = vsc->bFrameIndex,
+                    .dwFrameInterval = le32_to_cpu(vsc->dwFrameInterval)
+                };
+
+                if (qemu_videodev_check_options(s->video, &opts) == false) {
                     s->error = VC_ERROR_OUT_OF_RANGE;
                     break;
                 }

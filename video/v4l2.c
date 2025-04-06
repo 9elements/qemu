@@ -200,47 +200,6 @@ static void video_v4l2_enum_modes(Videodev *vd, Error **errp)
     }
 }
 
-static int video_v4l2_set_mode(Videodev *vd, Error **errp)
-{
-    struct v4l2_format fmt;
-    V4l2Videodev*      vv = V4L2_VIDEODEV(vd);
-
-    /*
-     * currently selecting the very first mode using its
-     * very first framesize
-     * */
-
-    if (vd->nmode == 0) {
-        error_setg_errno(errp, errno, "no modes available for video device");
-        return -1;
-    }
-
-    if (vd->modes[0].nframesize == 0) {
-        error_setg_errno(errp, errno, "no framesize for first mode of video device");
-        return -1;
-    }
-
-    memset(&fmt, 0, sizeof(fmt));
-
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = vd->modes[0].framesizes[0].width;
-    fmt.fmt.pix.height = vd->modes[0].framesizes[0].height;
-    fmt.fmt.pix.pixelformat = vd->modes[0].pixelformat;
-    fmt.fmt.pix.field = V4L2_FIELD_NONE;
-
-    if (ioctl(vv->fd, VIDIOC_S_FMT, &fmt) < 0) {
-        error_setg_errno(errp, errno, "VIDIOC_S_FMT");
-        return -1;
-    }
-
-    if (ioctl(vv->fd, VIDIOC_G_FMT, &fmt) < 0) {
-        error_setg_errno(errp, errno, "VIDIOC_G_FMT");
-        return -1;
-    }
-
-    return 0;
-}
-
 static int video_v4l2_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
 {
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
@@ -389,10 +348,64 @@ video_v4l2_setup_buffers_error:
     return -1;
 }
 
+// @private
+static int video_v4l2_set_streaming_param(Videodev *vd, Error **errp) {
+
+    struct v4l2_streamparm   stream_param;
+    struct v4l2_captureparm* capture_param;
+    V4l2Videodev*            vv = V4L2_VIDEODEV(vd);
+
+    stream_param.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+    capture_param = &stream_param.parm.capture;
+    capture_param->timeperframe.numerator   = vd->selected.frmrt.numerator;
+    capture_param->timeperframe.denominator = vd->selected.frmrt.denominator;
+
+    if (ioctl(vv->fd, VIDIOC_S_PARM, &stream_param) < 0) {
+        error_setg_errno(errp, errno, "VIDIOC_S_PARM");
+        return -1;
+    }
+
+    return 0;
+}
+
+// @private
+static int video_v4l2_set_format(Videodev *vd, Error **errp) {
+
+    struct v4l2_format fmt;
+    V4l2Videodev*      vv = V4L2_VIDEODEV(vd);
+
+    memset(&fmt, 0, sizeof(fmt));
+
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    fmt.fmt.pix.width = vd->selected.frmsz->width;
+    fmt.fmt.pix.height = vd->selected.frmsz->height;
+    fmt.fmt.pix.pixelformat = vd->selected.mode->pixelformat;
+    fmt.fmt.pix.field = V4L2_FIELD_NONE;
+
+    if (ioctl(vv->fd, VIDIOC_S_FMT, &fmt) < 0) {
+        error_setg_errno(errp, errno, "VIDIOC_S_FMT");
+        return -1;
+    }
+
+    if (ioctl(vv->fd, VIDIOC_G_FMT, &fmt) < 0) {
+        error_setg_errno(errp, errno, "VIDIOC_G_FMT");
+        return -1;
+    }
+
+    return 0;
+}
+
 static int video_v4l2_stream_on(Videodev *vd, Error **errp) {
 
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+    if (video_v4l2_set_format(vd, errp) != 0)
+        return -1;
+
+    if (video_v4l2_set_streaming_param(vd, errp) != 0)
+        return -1;
 
     if (video_v4l2_setup_buffers(vd, errp) != 0)
         return -1;
@@ -432,7 +445,6 @@ static void video_v4l2_class_init(ObjectClass *oc, void *data)
     vc->open = video_v4l2_open;
     vc->close = video_v4l2_close;
     vc->enum_modes = video_v4l2_enum_modes;
-    vc->set_mode = video_v4l2_set_mode;
     vc->set_control = video_v4l2_set_control;
     vc->stream_on = video_v4l2_stream_on;
     vc->stream_off = video_v4l2_stream_off;
