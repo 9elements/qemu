@@ -201,7 +201,7 @@ int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
 
 bool qemu_videodev_check_options(Videodev *vd, VideoStreamOptions *opts) {
 
-    const uint8_t format_index = opts->bFormatIndex - 1;
+    const uint8_t format_index = opts->bFormatIndex - 1; // todo: move to dev-video.c
     const uint8_t frame_index  = opts->bFrameIndex - 1;
 
     if (format_index >= vd->nmode)
@@ -263,6 +263,48 @@ int qemu_videodev_stream_off(Videodev *vd, Error **errp) {
     }
 
     return vc->stream_off(vd, errp);
+}
+
+// @private
+static inline bool videodev_frame_ready(Videodev *vd) {
+
+    return (vd->current_frame.data != NULL) && (vd->current_frame.bytes_left != 0);
+}
+
+int videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp) {
+
+    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+
+    if (videodev_frame_ready(vd) == false) {
+
+        if (vc->claim_frame == NULL)
+            return -ENOTSUP;
+
+        if (vc->claim_frame(vd, errp) != 0)
+            return -EBUSY;
+    }
+
+    chunk->size = MIN(vd->current_frame.bytes_left, upto);
+    chunk->data = vd->current_frame.data;
+
+    vd->current_frame.data        = vd->current_frame.data + chunk->size;
+    vd->current_frame.bytes_left -= chunk->size;
+
+    if (vd->current_frame.bytes_left == 0) {
+
+        if (vc->release_frame == NULL)
+            return -ENOTSUP;
+
+        if (vc->release_frame(vd, errp) != 0)
+            return -EBUSY;
+    }
+
+    return 0;
+}
+
+size_t videodev_current_frame_length(Videodev *vd) {
+
+    return vd->current_frame.bytes_left;
 }
 
 static void video_instance_init(Object *obj) {

@@ -10,10 +10,10 @@
 #define TYPE_VIDEODEV_V4L2 TYPE_VIDEODEV"-v4l2"
 
 #define V4L2_BUFFER_MAX 16
-#define V4L2_BUFFER_DFL 2
+#define V4L2_BUFFER_DFL 4
 
 typedef struct V4l2Buffer {
-    unsigned char *addr;
+    uint8_t *addr;
     uint32_t length;
 } V4l2Buffer;
 
@@ -21,8 +21,13 @@ struct V4l2Videodev {
     Videodev parent;
     int fd;
     char* device_path;
+
     uint8_t nbuffers;
     V4l2Buffer buffers[V4L2_BUFFER_MAX];
+
+    struct V4l2VideoFrame {
+        int index;
+    } current_frame;
 };
 typedef struct V4l2Videodev V4l2Videodev;
 
@@ -417,8 +422,6 @@ static int video_v4l2_stream_on(Videodev *vd, Error **errp) {
         return -1;
     }
 
-    // todo: capture frames
-
     return 0;
 }
 
@@ -437,17 +440,52 @@ static int video_v4l2_stream_off(Videodev *vd, Error **errp) {
     return retval;
 }
 
+static int video_v4l2_claim_frame(Videodev *vd, Error **errp) {
+
+    V4l2Videodev* vv = V4L2_VIDEODEV(vd);
+
+    if (video_v4l2_dqbuf(vd, &vv->current_frame.index) < 0) {
+
+        error_setg_errno(errp, errno, "VIDIOC_DQBUF");
+        return -1;
+    }
+
+    vd->current_frame.data       = vv->buffers[vv->current_frame.index].addr;
+    vd->current_frame.bytes_left = vv->buffers[vv->current_frame.index].length;
+
+    return 0;
+}
+
+static int video_v4l2_release_frame(Videodev *vd, Error **errp) {
+
+    V4l2Videodev* vv = V4L2_VIDEODEV(vd);
+
+    if (video_v4l2_qbuf(vd, vv->current_frame.index) < 0) {
+
+        error_setg_errno(errp, errno, "VIDIOC_QBUF");
+        return -1;
+    }
+
+    vv->current_frame.index      = -1;
+    vd->current_frame.data       = NULL;
+    vd->current_frame.bytes_left = 0;
+
+    return 0;
+}
+
 static void video_v4l2_class_init(ObjectClass *oc, void *data)
 {
     VideodevClass *vc = VIDEODEV_CLASS(oc);
 
-    vc->parse = video_v4l2_parse;
-    vc->open = video_v4l2_open;
-    vc->close = video_v4l2_close;
-    vc->enum_modes = video_v4l2_enum_modes;
-    vc->set_control = video_v4l2_set_control;
-    vc->stream_on = video_v4l2_stream_on;
-    vc->stream_off = video_v4l2_stream_off;
+    vc->parse         = video_v4l2_parse;
+    vc->open          = video_v4l2_open;
+    vc->close         = video_v4l2_close;
+    vc->enum_modes    = video_v4l2_enum_modes;
+    vc->set_control   = video_v4l2_set_control;
+    vc->stream_on     = video_v4l2_stream_on;
+    vc->stream_off    = video_v4l2_stream_off;
+    vc->claim_frame   = video_v4l2_claim_frame;
+    vc->release_frame = video_v4l2_release_frame;
 }
 
 static const TypeInfo video_v4l2_type_info = {

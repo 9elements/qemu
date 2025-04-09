@@ -72,6 +72,11 @@ typedef struct VideoStreamOptions {
     uint32_t dwFrameInterval; // cpu, not le32
 } VideoStreamOptions;
 
+typedef struct VideoFrameChunk {
+    void *data;
+    size_t size;
+} VideoFrameChunk;
+
 #define TYPE_VIDEODEV "videodev"
 OBJECT_DECLARE_TYPE(Videodev, VideodevClass, VIDEODEV)
 
@@ -90,26 +95,83 @@ struct Videodev {
         VideoFramerate frmrt;
     } selected;
 
+    struct VideoFrame {
+        uint8_t *data;
+        size_t bytes_left;
+    } current_frame;
+
     QLIST_ENTRY(Videodev) list;
 };
 
 struct VideodevClass {
     ObjectClass parent_class;
 
-    /* parse command line options and populate QAPI @backend */
+    /*
+     * Parse command line options and populate QAPI @backend
+     * */
     void (*parse)(Videodev *vd, QemuOpts *opts, Error **errp);
-    /* called after construction, open/starts the backend */
+
+    /*
+     * Called after construction, open/starts the backend
+     * */
     void (*open)(Videodev *vd, Error **errp);
-    /* called upon deconstruction, closes the backend and frees resources */
+
+    /*
+     * Called upon deconstruction, closes the backend and frees resources
+     * */
     void (*close)(Videodev *vd, Error **errp);
-    /* enumerate all supported modes */
+
+    /*
+     * Enumerate all supported modes
+     * */
     void (*enum_modes)(Videodev *vd, Error **errp);
-    /* set control */
+
+    /*
+     * Set control
+     * */
     int (*set_control)(Videodev *vd, VideodevControl *ctrl, Error **errp);
-    /* start video capture stream */
+
+    /*
+     * Start video capture stream
+     * */
     int (*stream_on)(Videodev *vd, Error **errp);
-    /* stop video capture stream */
+
+    /*
+     * Stop video capture stream
+     * */
     int (*stream_off)(Videodev *vd, Error **errp);
+
+    /*
+     * Claim a single frame from the backend.
+     *
+     * An implementation of claim_frame must do the following
+     *
+     *   - set Videodev.current_frame.data to the start address of the
+     *     newly acquired video frame
+     *   - set Videodev.current_frame.bytes_left to the total size of the
+     *     newly acquired video frame
+     *
+     * On error, claim_frame must return a negative value and must not
+     * modify Videodev.current_frame at all.
+     *
+     * On success, it should return 0.
+     * */
+    int (*claim_frame)(Videodev *vd, Error **errp);
+
+    /*
+     * Release a previously acquired frame.
+     *
+     * An implementation of release_frame must do the following
+     *
+     *   - set Videodev.current_frame.data to NULL
+     *   - set Videodev.current_frame.bytes_left to 0
+     *
+     * On error, release_frame must return a negative value and must not
+     * modify Videodev.current_frame at all.
+     *
+     * On success, it should return 0.
+     * */
+    int (*release_frame)(Videodev *vd, Error **errp);
 };
 
 /* ====== */
@@ -120,6 +182,8 @@ int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
 bool qemu_videodev_check_options(Videodev *vd, VideoStreamOptions *opts);
 int qemu_videodev_stream_on(Videodev *vd, VideoStreamOptions *opts, Error **errp);
 int qemu_videodev_stream_off(Videodev *vd, Error **errp);
+int videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp);
+size_t videodev_current_frame_length(Videodev *vd);
 
 /* ====== */
 

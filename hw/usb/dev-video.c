@@ -53,6 +53,7 @@ struct USBVideoState {
 
     /* UVC control */
     int altset;
+    bool fid;
     uint8_t error;
     USBVideoControlInfo pu_attrs[PU_MAX];
     QTAILQ_HEAD(, USBVideoControlStats) control_status;
@@ -576,12 +577,59 @@ static void usb_video_handle_data_control_in(USBDevice *dev, USBPacket *p)
 
 static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
 {
+    USBVideoState *s = USB_VIDEO(dev);
     USBBus *bus = usb_bus_from_device(dev);
-    int len = 0;
+    QEMUIOVector *iov = p->combined ? &p->combined->iov : &p->iov;
+    size_t payload_length, packet_with_header_length;
+    VideoFrameChunk frame_chunk;
+    Error *err;
+    int rc;
 
-    trace_usb_video_handle_data_streaming_in(bus->busnr, dev->addr, len);
+    VideoImagePayloadHeader header = {
 
-    p->status = USB_RET_STALL;
+        .bmHeaderInfo  = PAYLOAD_HEADER_EOH | (s->fid ? PAYLOAD_HEADER_FID : 0),
+        .bHeaderLength = 2
+    };
+
+    packet_with_header_length = p->actual_length + header.bHeaderLength;
+    payload_length            = iov->size - packet_with_header_length;
+
+    if (s->altset != ALTSET_STREAMING) {
+
+        p->status = USB_RET_NAK;
+        return;
+    }
+
+    if (packet_with_header_length >= iov->size) {
+
+        p->status = USB_RET_STALL;
+        return;
+    }
+
+    if ((rc = videodev_read_frame(s->video, payload_length, &frame_chunk, &err)) == -ENOTSUP) {
+
+        error_reportf_err(err, "%s: ", TYPE_USB_VIDEO);
+        p->status = USB_RET_STALL;
+        return;
+
+    } else if (rc < 0) {
+
+        p->status = USB_RET_NAK;
+        return;
+    }
+
+    if (videodev_current_frame_length(s->video) == 0) {
+
+        header.bmHeaderInfo |= PAYLOAD_HEADER_EOF;
+        s->fid = !s->fid;
+    }
+
+    usb_packet_copy(p, &header, header.bHeaderLength);
+    usb_packet_copy(p, frame_chunk.data, frame_chunk.size);
+
+    p->status = USB_RET_SUCCESS;
+
+    trace_usb_video_handle_data_streaming_in(bus->busnr, dev->addr, payload_length);
 }
 
 static uint32_t usb_video_get_max_framesize(Videodev *video)
@@ -669,6 +717,7 @@ static void usb_video_realize(USBDevice *dev, Error **errp)
 
     s->dev.opaque = s;
     s->altset     = ALTSET_OFF;
+    s->fid        = false;
     s->error      = 0;
 }
 
@@ -964,7 +1013,7 @@ static void usb_video_set_streaming_altset(USBDevice *dev, int altset)
 
     case ALTSET_STREAMING:
         {
-            VideoStreamingControl *vsc = (VideoStreamingControl*) &s->vsc_attrs[ATTRIBUTE_CUR];
+            VideoStreamingControl *vsc = &s->vsc_attrs[ATTRIBUTE_CUR];
 
             VideoStreamOptions opts = {
                 .bFormatIndex    = vsc->bFormatIndex,
