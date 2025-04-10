@@ -447,7 +447,7 @@ static int video_v4l2_claim_frame(Videodev *vd, Error **errp) {
     if (video_v4l2_dqbuf(vd, &vv->current_frame.index) < 0) {
 
         error_setg_errno(errp, errno, "VIDIOC_DQBUF");
-        return -1;
+        return -errno;
     }
 
     vd->current_frame.data       = vv->buffers[vv->current_frame.index].addr;
@@ -463,7 +463,7 @@ static int video_v4l2_release_frame(Videodev *vd, Error **errp) {
     if (video_v4l2_qbuf(vd, vv->current_frame.index) < 0) {
 
         error_setg_errno(errp, errno, "VIDIOC_QBUF");
-        return -1;
+        return -errno;
     }
 
     vv->current_frame.index      = -1;

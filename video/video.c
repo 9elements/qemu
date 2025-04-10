@@ -193,7 +193,7 @@ int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
 
         error_setg(errp, "%s: %s missing 'set_control' implementation!",
                    TYPE_VIDEODEV, qemu_videodev_get_id(vd));
-        return -ENOTSUP;
+        return VIDEODEV_RC_NOTSUP;
     }
 
     return vc->set_control(vd, ctrl, errp);
@@ -238,14 +238,14 @@ int qemu_videodev_stream_on(Videodev *vd, VideoStreamOptions *opts, Error **errp
     if (qemu_videodev_select_options(vd, opts) < 0) {
 
         error_setg(errp, "%s: Failed to select options - Invalid mode/framesize", TYPE_VIDEODEV);
-        return -ENOTSUP;
+        return VIDEODEV_RC_NOTSUP;
     }
 
     if (vc->stream_on == NULL) {
 
         error_setg(errp, "%s: %s missing 'stream_on' implementation!",
                    TYPE_VIDEODEV, qemu_videodev_get_id(vd));
-        return -ENOTSUP;
+        return VIDEODEV_RC_NOTSUP;
     }
 
     return vc->stream_on(vd, errp);
@@ -259,7 +259,7 @@ int qemu_videodev_stream_off(Videodev *vd, Error **errp) {
 
         error_setg(errp, "%s: %s missing 'stream_off' implementation!",
                    TYPE_VIDEODEV, qemu_videodev_get_id(vd));
-        return -ENOTSUP;
+        return VIDEODEV_RC_NOTSUP;
     }
 
     return vc->stream_off(vd, errp);
@@ -274,14 +274,18 @@ static inline bool videodev_frame_ready(Videodev *vd) {
 int videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp) {
 
     VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+    int rc;
 
     if (videodev_frame_ready(vd) == false) {
 
         if (vc->claim_frame == NULL)
-            return -ENOTSUP;
+            return VIDEODEV_RC_NOTSUP;
 
-        if (vc->claim_frame(vd, errp) != 0)
-            return -EBUSY;
+        if ((rc = vc->claim_frame(vd, errp)) == -EAGAIN)
+            return VIDEODEV_RC_UNDERRUN;
+
+        if (rc != 0)
+            return VIDEODEV_RC_ERROR;
     }
 
     chunk->size = MIN(vd->current_frame.bytes_left, upto);
@@ -293,13 +297,13 @@ int videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk,
     if (vd->current_frame.bytes_left == 0) {
 
         if (vc->release_frame == NULL)
-            return -ENOTSUP;
+            return VIDEODEV_RC_NOTSUP;
 
         if (vc->release_frame(vd, errp) != 0)
-            return -EBUSY;
+            return VIDEODEV_RC_ERROR;
     }
 
-    return 0;
+    return VIDEODEV_RC_OK;
 }
 
 size_t videodev_current_frame_length(Videodev *vd) {

@@ -10,6 +10,14 @@
                           ((uint32_t)(a) | ((uint32_t)(b) << 8) | \
                           ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 
+/*
+ * custom return codes emitted by Videodev
+ * */
+#define VIDEODEV_RC_OK        0 // everything ok
+#define VIDEODEV_RC_ERROR    -1 // generic error code
+#define VIDEODEV_RC_UNDERRUN -2 // streaming underrun
+#define VIDEODEV_RC_NOTSUP   -3 // operation not supported
+
 #define QEMU_VIDEO_PIX_FMT_YUYV   fourcc_code('Y', 'U', 'Y', 'V')
 #define QEMU_VIDEO_PIX_FMT_NV12   fourcc_code('N', 'V', '1', '2')
 #define QEMU_VIDEO_PIX_FMT_MJPEG  fourcc_code('M', 'J', 'P', 'G')
@@ -151,8 +159,10 @@ struct VideodevClass {
      *   - set Videodev.current_frame.bytes_left to the total size of the
      *     newly acquired video frame
      *
-     * On error, claim_frame must return a negative value and must not
+     * On error, claim_frame must return a non-zero value and must not
      * modify Videodev.current_frame at all.
+     *
+     * If no frame is ready to be claimed, -EAGAIN shall be returned
      *
      * On success, it should return 0.
      * */
@@ -166,7 +176,7 @@ struct VideodevClass {
      *   - set Videodev.current_frame.data to NULL
      *   - set Videodev.current_frame.bytes_left to 0
      *
-     * On error, release_frame must return a negative value and must not
+     * On error, release_frame must return a non-zero value and must not
      * modify Videodev.current_frame at all.
      *
      * On success, it should return 0.

@@ -55,6 +55,7 @@ struct USBVideoState {
     int altset;
     bool fid;
     uint8_t error;
+    uint8_t streaming_error;
     USBVideoControlInfo pu_attrs[PU_MAX];
     QTAILQ_HEAD(, USBVideoControlStats) control_status;
 
@@ -567,12 +568,42 @@ static VideodevControlType usb_video_pu_control_type_to_qemu(uint8_t cs)
 
 static void usb_video_handle_data_control_in(USBDevice *dev, USBPacket *p)
 {
+    USBVideoState *s = USB_VIDEO(dev);
     USBBus *bus = usb_bus_from_device(dev);
-    int len = 0;
+    USBVideoControlStats *usb_status = NULL;
+    QEMUIOVector *iov = p->combined ? &p->combined->iov : &p->iov;
+    size_t len;
 
+    if (QTAILQ_EMPTY(&s->control_status)) {
+
+        p->status = USB_RET_NAK;
+        goto out;
+    }
+
+    usb_status = QTAILQ_FIRST(&s->control_status);
+    QTAILQ_REMOVE(&s->control_status, usb_status, list);
+
+    len = MIN(5 + usb_status->size, iov->size);
+    usb_packet_copy(p, &usb_status->status, len);
+
+    p->status = USB_RET_SUCCESS;
+
+out:
     trace_usb_video_handle_data_control_in(bus->busnr, dev->addr, len);
+}
 
-    p->status = USB_RET_STALL;
+static void usb_video_send_empty_packet(USBDevice *dev, USBPacket *p)
+{
+    USBVideoState *s = USB_VIDEO(dev);
+
+    VideoImagePayloadHeader header = {
+
+        .bmHeaderInfo  = PAYLOAD_HEADER_EOH | PAYLOAD_HEADER_ERR,
+        .bHeaderLength = 2
+    };
+
+    usb_packet_copy(p, &header, header.bHeaderLength);
+    s->streaming_error = VS_ERROR_INPUT_BUFFER_UNDERRUN;
 }
 
 static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
@@ -606,17 +637,25 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
         return;
     }
 
-    if ((rc = videodev_read_frame(s->video, payload_length, &frame_chunk, &err)) == -ENOTSUP) {
+    rc = videodev_read_frame(s->video, payload_length, &frame_chunk, &err);
+
+    if (rc == VIDEODEV_RC_UNDERRUN) {
+
+        qemu_log("underrun\n");
+
+        usb_video_send_empty_packet(dev, p);
+        p->status = USB_RET_SUCCESS;
+        return;
+    }
+
+    if (rc != VIDEODEV_RC_OK) {
 
         error_reportf_err(err, "%s: ", TYPE_USB_VIDEO);
         p->status = USB_RET_STALL;
         return;
-
-    } else if (rc < 0) {
-
-        p->status = USB_RET_NAK;
-        return;
     }
+
+    qemu_log("ok\n");
 
     if (videodev_current_frame_length(s->video) == 0) {
 
@@ -715,10 +754,11 @@ static void usb_video_realize(USBDevice *dev, Error **errp)
 
     QTAILQ_INIT(&s->control_status);
 
-    s->dev.opaque = s;
-    s->altset     = ALTSET_OFF;
-    s->fid        = false;
-    s->error      = 0;
+    s->dev.opaque      = s;
+    s->altset          = ALTSET_OFF;
+    s->fid             = false;
+    s->error           = 0;
+    s->streaming_error = 0;
 }
 
 static void usb_video_handle_reset(USBDevice *dev)
@@ -823,6 +863,14 @@ static int usb_video_get_control(USBDevice *dev, int request, int value,
         switch (cs) {
         case VS_PROBE_CONTROL:
             handle_get_streaming(s, req, vsc, length, data, ret);
+            break;
+
+        case VS_STREAM_ERROR_CODE_CONTROL:
+            if (length != 1)
+                break;
+
+            data[0] = s->streaming_error;
+            ret     = 1;
             break;
 
         default:
