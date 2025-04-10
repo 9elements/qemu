@@ -192,8 +192,8 @@ int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
 bool qemu_videodev_check_options(Videodev *vd, VideoStreamOptions *opts);
 int qemu_videodev_stream_on(Videodev *vd, VideoStreamOptions *opts, Error **errp);
 int qemu_videodev_stream_off(Videodev *vd, Error **errp);
-int videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp);
-size_t videodev_current_frame_length(Videodev *vd);
+int qemu_videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp);
+size_t qemu_videodev_current_frame_length(Videodev *vd);
 
 /* ====== */
 

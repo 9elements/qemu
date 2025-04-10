@@ -65,6 +65,12 @@ static const VideodevClass *videodev_get_class(const char *backend, Error **errp
     return vc;
 }
 
+// @private
+static inline bool videodev_frame_ready(Videodev *vd) {
+
+    return (vd->current_frame.data != NULL) && (vd->current_frame.bytes_left != 0);
+}
+
 char *qemu_videodev_get_id(Videodev *vd)
 {
     return vd->id;
@@ -262,16 +268,13 @@ int qemu_videodev_stream_off(Videodev *vd, Error **errp) {
         return VIDEODEV_RC_NOTSUP;
     }
 
+    if (videodev_frame_ready(vd) == true)
+        vc->release_frame(vd, errp);
+
     return vc->stream_off(vd, errp);
 }
 
-// @private
-static inline bool videodev_frame_ready(Videodev *vd) {
-
-    return (vd->current_frame.data != NULL) && (vd->current_frame.bytes_left != 0);
-}
-
-int videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp) {
+int qemu_videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp) {
 
     VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
     int rc;
@@ -306,7 +309,7 @@ int videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk,
     return VIDEODEV_RC_OK;
 }
 
-size_t videodev_current_frame_length(Videodev *vd) {
+size_t qemu_videodev_current_frame_length(Videodev *vd) {
 
     return vd->current_frame.bytes_left;
 }

@@ -637,7 +637,7 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
         return;
     }
 
-    rc = videodev_read_frame(s->video, payload_length, &frame_chunk, &err);
+    rc = qemu_videodev_read_frame(s->video, payload_length, &frame_chunk, &err);
 
     if (rc == VIDEODEV_RC_UNDERRUN) {
 
@@ -653,7 +653,7 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
         return;
     }
 
-    if (videodev_current_frame_length(s->video) == 0) {
+    if (qemu_videodev_current_frame_length(s->video) == 0) {
 
         header.bmHeaderInfo |= PAYLOAD_HEADER_EOF;
         s->fid = !s->fid;
