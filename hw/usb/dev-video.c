@@ -641,8 +641,6 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
 
     if (rc == VIDEODEV_RC_UNDERRUN) {
 
-        qemu_log("underrun\n");
-
         usb_video_send_empty_packet(dev, p);
         p->status = USB_RET_SUCCESS;
         return;
@@ -654,8 +652,6 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
         p->status = USB_RET_STALL;
         return;
     }
-
-    qemu_log("ok\n");
 
     if (videodev_current_frame_length(s->video) == 0) {
 
