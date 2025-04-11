@@ -940,9 +940,9 @@ static int usb_video_set_control(USBDevice *dev, int request, int value,
                 VideoStreamingControl *vsc = (VideoStreamingControl*) data;
 
                 VideoStreamOptions opts = {
-                    .bFormatIndex    = vsc->bFormatIndex,
-                    .bFrameIndex     = vsc->bFrameIndex,
-                    .dwFrameInterval = le32_to_cpu(vsc->dwFrameInterval)
+                    .format_index   = vsc->bFormatIndex - 1,
+                    .frame_index    = vsc->bFrameIndex - 1,
+                    .frame_interval = le32_to_cpu(vsc->dwFrameInterval)
                 };
 
                 if (qemu_videodev_check_options(s->video, &opts) == false) {
@@ -1060,9 +1060,9 @@ static void usb_video_set_streaming_altset(USBDevice *dev, int altset)
             VideoStreamingControl *vsc = &s->vsc_attrs[ATTRIBUTE_CUR];
 
             VideoStreamOptions opts = {
-                .bFormatIndex    = vsc->bFormatIndex,
-                .bFrameIndex     = vsc->bFrameIndex,
-                .dwFrameInterval = le32_to_cpu(vsc->dwFrameInterval)
+                .format_index   = vsc->bFormatIndex - 1,
+                .frame_index    = vsc->bFrameIndex - 1,
+                .frame_interval = le32_to_cpu(vsc->dwFrameInterval)
             };
 
             if (qemu_videodev_stream_on(s->video, &opts, &local_err) != 0) {

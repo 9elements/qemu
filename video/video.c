@@ -207,13 +207,10 @@ int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
 
 bool qemu_videodev_check_options(Videodev *vd, VideoStreamOptions *opts) {
 
-    const uint8_t format_index = opts->bFormatIndex - 1; // todo: move to dev-video.c
-    const uint8_t frame_index  = opts->bFrameIndex - 1;
-
-    if (format_index >= vd->nmode)
+    if (opts->format_index >= vd->nmode)
         return false;
 
-    if (frame_index >= vd->modes[format_index].nframesize)
+    if (opts->frame_index >= vd->modes[opts->format_index].nframesize)
         return false;
 
     return true;
@@ -222,17 +219,14 @@ bool qemu_videodev_check_options(Videodev *vd, VideoStreamOptions *opts) {
 // @private
 static int qemu_videodev_select_options(Videodev *vd, VideoStreamOptions *opts) {
 
-    const uint8_t format_index = opts->bFormatIndex - 1;
-    const uint8_t frame_index  = opts->bFrameIndex - 1;
-
     if (qemu_videodev_check_options(vd, opts) == false)
         return -1;
 
-    vd->selected.mode  = &vd->modes[format_index];
-    vd->selected.frmsz = &vd->modes[format_index].framesizes[frame_index];
+    vd->selected.mode  = &vd->modes[opts->format_index];
+    vd->selected.frmsz = &vd->modes[opts->format_index].framesizes[opts->frame_index];
 
     vd->selected.frmrt.numerator   = 30; // prime number (2 * 3 * 5)
-    vd->selected.frmrt.denominator = 30 * 10000000 / opts->dwFrameInterval;
+    vd->selected.frmrt.denominator = 30 * 10000000 / opts->frame_interval;
 
     return 0;
 }

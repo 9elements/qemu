@@ -75,9 +75,9 @@ typedef struct VideoModes {
 } VideoMode;
 
 typedef struct VideoStreamOptions {
-    uint8_t bFormatIndex;
-    uint8_t bFrameIndex;
-    uint32_t dwFrameInterval; // cpu, not le32
+    uint8_t format_index;
+    uint8_t frame_index;
+    uint32_t frame_interval;
 } VideoStreamOptions;
 
 typedef struct VideoFrameChunk {
