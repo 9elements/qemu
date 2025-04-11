@@ -157,7 +157,7 @@ struct VideodevClass {
      *   - set Videodev.current_frame.data to the start address of the
      *     newly acquired video frame
      *   - set Videodev.current_frame.bytes_left to the total size of the
-     *     newly acquired video frame
+     *     newly acquired video frame (must be greater than zero)
      *
      * On error, claim_frame must return a non-zero value and must not
      * modify Videodev.current_frame at all.

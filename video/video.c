@@ -71,6 +71,73 @@ static inline bool videodev_frame_ready(Videodev *vd) {
     return (vd->current_frame.data != NULL) && (vd->current_frame.bytes_left != 0);
 }
 
+// @private
+static int videodev_claim_frame(Videodev *vd, Error **errp) {
+
+    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+    int rc;
+
+    if (vc->claim_frame == NULL) {
+
+        error_setg(errp, "%s: %s missing 'claim_frame' implementation!",
+                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        return VIDEODEV_RC_NOTSUP;
+    }
+
+    if ((rc = vc->claim_frame(vd, errp)) == -EAGAIN)
+        return VIDEODEV_RC_UNDERRUN;
+
+    if (rc != 0) {
+
+        error_setg(errp, "%s: %s could not claim frame!",
+                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        return VIDEODEV_RC_ERROR;
+    }
+
+    /*
+     * breaking this assertion means the backend
+     * messed up. It did NOT initialize the current frame
+     * properly despite returning with success (0).
+     *
+     * The solution here is to fix the implementation
+     * of claim_frame
+     * */
+    assert(videodev_frame_ready(vd) == true);
+    return VIDEODEV_RC_OK;
+}
+
+// @private
+static int videodev_release_frame(Videodev *vd, Error **errp) {
+
+    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
+    int rc;
+
+    if (vc->release_frame == NULL) {
+
+        error_setg(errp, "%s: %s missing 'release_frame' implementation!",
+                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        return VIDEODEV_RC_NOTSUP;
+    }
+
+    if ((rc = vc->release_frame(vd, errp)) != 0) {
+
+        error_setg(errp, "%s: %s could not release frame!",
+                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        return VIDEODEV_RC_ERROR;
+    }
+
+    /*
+     * breaking this assertion means the backend
+     * messed up. It did NOT release the current frame
+     * properly despite returning with success (0).
+     *
+     * The solution here is to fix the implementation
+     * of release_frame
+     * */
+    assert(videodev_frame_ready(vd) == false);
+    return VIDEODEV_RC_OK;
+}
+
 char *qemu_videodev_get_id(Videodev *vd)
 {
     return vd->id;
@@ -263,26 +330,19 @@ int qemu_videodev_stream_off(Videodev *vd, Error **errp) {
     }
 
     if (videodev_frame_ready(vd) == true)
-        vc->release_frame(vd, errp);
+        videodev_release_frame(vd, errp);
 
     return vc->stream_off(vd, errp);
 }
 
 int qemu_videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp) {
 
-    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
     int rc;
 
     if (videodev_frame_ready(vd) == false) {
 
-        if (vc->claim_frame == NULL)
-            return VIDEODEV_RC_NOTSUP;
-
-        if ((rc = vc->claim_frame(vd, errp)) == -EAGAIN)
-            return VIDEODEV_RC_UNDERRUN;
-
-        if (rc != 0)
-            return VIDEODEV_RC_ERROR;
+        if ((rc = videodev_claim_frame(vd, errp)) != VIDEODEV_RC_OK)
+            return rc;
     }
 
     chunk->size = MIN(vd->current_frame.bytes_left, upto);
@@ -293,11 +353,8 @@ int qemu_videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *c
 
     if (vd->current_frame.bytes_left == 0) {
 
-        if (vc->release_frame == NULL)
-            return VIDEODEV_RC_NOTSUP;
-
-        if (vc->release_frame(vd, errp) != 0)
-            return VIDEODEV_RC_ERROR;
+        if ((rc = videodev_release_frame(vd, errp)) != VIDEODEV_RC_OK)
+            return rc;
     }
 
     return VIDEODEV_RC_OK;
