@@ -6,6 +6,9 @@
 #include "qemu/qemu-print.h"
 #include "video/video.h"
 
+#define vd_error_setg(vd, errp, fmt, ...) \
+    error_setg(errp, "%s: %s: " fmt, TYPE_VIDEODEV, qemu_videodev_get_id(vd), ## __VA_ARGS__)
+
 static QLIST_HEAD(, Videodev) videodevs;
 
 typedef struct VideodevClassFE {
@@ -13,35 +16,28 @@ typedef struct VideodevClassFE {
     void *opaque;
 } VideodevClassFE;
 
-static void
-videodev_class_foreach(ObjectClass *klass, void *opaque)
-{
+static void videodev_class_foreach(ObjectClass *klass, void *opaque) {
+
     VideodevClassFE *fe = opaque;
 
     assert(g_str_has_prefix(object_class_get_name(klass), "videodev-"));
-
     fe->fn(object_class_get_name(klass) + sizeof(TYPE_VIDEODEV), fe->opaque);
 }
 
-static void
-videodev_name_foreach(void (*fn)(const char *name, void *opaque),
-                     void *opaque)
-{
-    VideodevClassFE fe = { .fn = fn, .opaque = opaque };
+static void videodev_name_foreach(void (*fn)(const char *name, void *opaque), void *opaque) {
 
+    VideodevClassFE fe = { .fn = fn, .opaque = opaque };
     object_class_foreach(videodev_class_foreach, TYPE_VIDEODEV, false, &fe);
 }
 
-static void
-help_string_append(const char *name, void *opaque)
-{
-    GString *str = opaque;
+static void help_string_append(const char *name, void *opaque) {
 
+    GString *str = opaque;
     g_string_append_printf(str, "\n%s", name);
 }
 
-static const VideodevClass *videodev_get_class(const char *backend, Error **errp)
-{
+static const VideodevClass* videodev_get_class(const char *backend, Error **errp) {
+
     ObjectClass *oc;
     const VideodevClass *vc;
     char *typename = g_strdup_printf("videodev-%s", backend);
@@ -55,13 +51,11 @@ static const VideodevClass *videodev_get_class(const char *backend, Error **errp
     }
 
     if (object_class_is_abstract(oc)) {
-        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "backend",
-                   "a non-abstract device type");
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "backend", "a non-abstract device type");
         return NULL;
     }
 
     vc = VIDEODEV_CLASS(oc);
-
     return vc;
 }
 
@@ -79,8 +73,7 @@ static int videodev_claim_frame(Videodev *vd, Error **errp) {
 
     if (vc->claim_frame == NULL) {
 
-        error_setg(errp, "%s: %s missing 'claim_frame' implementation!",
-                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        vd_error_setg(vd, errp, "missing 'claim_frame' method!");
         return VIDEODEV_RC_NOTSUP;
     }
 
@@ -89,8 +82,7 @@ static int videodev_claim_frame(Videodev *vd, Error **errp) {
 
     if (rc != 0) {
 
-        error_setg(errp, "%s: %s could not claim frame!",
-                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        vd_error_setg(vd, errp, "could not claim frame!");
         return VIDEODEV_RC_ERROR;
     }
 
@@ -114,15 +106,13 @@ static int videodev_release_frame(Videodev *vd, Error **errp) {
 
     if (vc->release_frame == NULL) {
 
-        error_setg(errp, "%s: %s missing 'release_frame' implementation!",
-                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        vd_error_setg(vd, errp, "missing 'release_frame' method!");
         return VIDEODEV_RC_NOTSUP;
     }
 
     if ((rc = vc->release_frame(vd, errp)) != 0) {
 
-        error_setg(errp, "%s: %s could not release frame!",
-                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        vd_error_setg(vd, errp, "could not release frame!");
         return VIDEODEV_RC_ERROR;
     }
 
@@ -138,13 +128,13 @@ static int videodev_release_frame(Videodev *vd, Error **errp) {
     return VIDEODEV_RC_OK;
 }
 
-char *qemu_videodev_get_id(Videodev *vd)
-{
+char* qemu_videodev_get_id(Videodev *vd) {
+
     return vd->id;
 }
 
-Videodev *qemu_videodev_by_id(char *id, Error **errp)
-{
+Videodev* qemu_videodev_by_id(char *id, Error **errp) {
+
     Videodev *vd;
 
     QLIST_FOREACH(vd, &videodevs, list) {
@@ -154,21 +144,21 @@ Videodev *qemu_videodev_by_id(char *id, Error **errp)
     }
 
     error_setg(errp, "videodev '%s' not found", id);
-
     return NULL;
 }
 
-void qemu_videodev_register(Videodev *vd, Error **errp)
-{
+void qemu_videodev_register(Videodev *vd, Error **errp) {
+
     if (vd->registered) {
-        error_setg(errp, "videodev '%s' already in use", vd->id);
+        vd_error_setg(vd, errp, "videodev already registered");
         return;
     }
 
     vd->registered = true;
 }
 
-Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp) {
+Videodev* qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp) {
+
     Error *local_err = NULL;
     Object *obj;
     Videodev *vd;
@@ -177,8 +167,8 @@ Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp) {
     const char *id = qemu_opts_id(opts);
 
     if (name && is_help_option(name)) {
-        GString *str = g_string_new("");
 
+        GString *str = g_string_new("");
         videodev_name_foreach(help_string_append, str);
 
         qemu_printf("Available videodev backend types: %s\n", str->str);
@@ -228,7 +218,6 @@ Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp) {
     }
 
     QLIST_INSERT_HEAD(&videodevs, vd, list);
-
     return vd;
 
 error:
@@ -242,8 +231,7 @@ int qemu_videodev_delete(Videodev *vd, Error **errp) {
 
     if (qemu_videodev_stream_off(vd, errp) != 0) {
 
-        error_setg(errp, "%s: %s stream_off failure duringdevice deletion!",
-                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        vd_error_setg(vd, errp, "'stream_off' failure during device deletion!");
         return -1;
     }
 
@@ -264,8 +252,7 @@ int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
 
     if (vc->set_control == NULL) {
 
-        error_setg(errp, "%s: %s missing 'set_control' implementation!",
-                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        vd_error_setg(vd, errp, "missing 'set_control' method!");
         return VIDEODEV_RC_NOTSUP;
     }
 
@@ -304,14 +291,13 @@ int qemu_videodev_stream_on(Videodev *vd, VideoStreamOptions *opts, Error **errp
 
     if (qemu_videodev_select_options(vd, opts) < 0) {
 
-        error_setg(errp, "%s: Failed to select options - Invalid mode/framesize", TYPE_VIDEODEV);
+        vd_error_setg(vd, errp, "failed to select options - Invalid mode/framesize");
         return VIDEODEV_RC_NOTSUP;
     }
 
     if (vc->stream_on == NULL) {
 
-        error_setg(errp, "%s: %s missing 'stream_on' implementation!",
-                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        vd_error_setg(vd, errp, "missing 'stream_on' method!");
         return VIDEODEV_RC_NOTSUP;
     }
 
@@ -324,8 +310,7 @@ int qemu_videodev_stream_off(Videodev *vd, Error **errp) {
 
     if (vc->stream_off == NULL) {
 
-        error_setg(errp, "%s: %s missing 'stream_off' implementation!",
-                   TYPE_VIDEODEV, qemu_videodev_get_id(vd));
+        vd_error_setg(vd, errp, "missing 'stream_off' method!");
         return VIDEODEV_RC_NOTSUP;
     }
 
@@ -380,8 +365,8 @@ static const TypeInfo video_type_info = {
     .class_size = sizeof(VideodevClass),
 };
 
-static void register_types(void)
-{
+static void register_types(void) {
+
     type_register_static(&video_type_info);
 }
 
