@@ -6,6 +6,9 @@
 #include "qom/object.h"
 #include "qemu/queue.h"
 
+#define vd_error_setg(vd, errp, fmt, ...) \
+    error_setg(errp, "%s: %s: " fmt, TYPE_VIDEODEV, qemu_videodev_get_id(vd), ## __VA_ARGS__)
+
 #define fourcc_code(a, b, c, d) \
                           ((uint32_t)(a) | ((uint32_t)(b) << 8) | \
                           ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
@@ -17,6 +20,7 @@
 #define VIDEODEV_RC_ERROR    -1 // generic error code
 #define VIDEODEV_RC_UNDERRUN -2 // streaming underrun
 #define VIDEODEV_RC_NOTSUP   -3 // operation not supported
+#define VIDEODEV_RC_INVAL    -4 // invalid argument
 
 #define QEMU_VIDEO_PIX_FMT_YUYV   fourcc_code('Y', 'U', 'Y', 'V')
 #define QEMU_VIDEO_PIX_FMT_NV12   fourcc_code('N', 'V', '1', '2')
@@ -93,6 +97,7 @@ struct Videodev {
 
     char *id;
     bool registered;
+    bool is_streaming;
 
     int nmode;
     VideoMode *modes;
@@ -116,70 +121,128 @@ struct VideodevClass {
 
     /*
      * Parse command line options and populate QAPI @backend
+     *
+     * on success:
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
      * */
-    void (*parse)(Videodev *vd, QemuOpts *opts, Error **errp);
+    int (*parse)(Videodev *vd, QemuOpts *opts, Error **errp);
 
     /*
+     * [optional]
      * Called after construction, open/starts the backend
+     *
+     * on success:
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
      * */
-    void (*open)(Videodev *vd, Error **errp);
+    int (*open)(Videodev *vd, Error **errp);
 
     /*
+     * [optional]
      * Called upon deconstruction, closes the backend and frees resources
+     *
+     * on success:
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
      * */
-    void (*close)(Videodev *vd, Error **errp);
+    int (*close)(Videodev *vd, Error **errp);
 
     /*
      * Enumerate all supported modes
+     *
+     * The backend-specific implementation has to allocate
+     * and populate Videodev.modes
+     *
+     * on success:
+     *   creates and populates Videodev.modes
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
      * */
-    void (*enum_modes)(Videodev *vd, Error **errp);
+    int (*enum_modes)(Videodev *vd, Error **errp);
 
     /*
      * Set control
+     *
+     * on success:
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
      * */
     int (*set_control)(Videodev *vd, VideodevControl *ctrl, Error **errp);
 
     /*
      * Start video capture stream
+     *
+     * This function enables the video streaming by following
+     * a backend-specific procedure.
+     *
+     * on success:
+     *   enables video streaming so that frames can be acquired
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
      * */
     int (*stream_on)(Videodev *vd, Error **errp);
 
     /*
      * Stop video capture stream
+     *
+     * Tbis function disables the video streaming. It is
+     * the counterpart to stream_on.
+     *
+     * on success:
+     *   disables video streaming, reverses stream_on
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
      * */
     int (*stream_off)(Videodev *vd, Error **errp);
 
     /*
      * Claim a single frame from the backend.
      *
-     * An implementation of claim_frame must do the following
+     * An implementation of claim_frame must acquire the latest
+     * frame from the backend.
      *
-     *   - set Videodev.current_frame.data to the start address of the
-     *     newly acquired video frame
-     *   - set Videodev.current_frame.bytes_left to the total size of the
-     *     newly acquired video frame (must be greater than zero)
+     * If no frame is ready to be claimed, VIDEODEV_RC_UNDERRUN shall be returned
      *
-     * On error, claim_frame must return a non-zero value and must not
-     * modify Videodev.current_frame at all.
-     *
-     * If no frame is ready to be claimed, -EAGAIN shall be returned
-     *
-     * On success, it should return 0.
+     * on success:
+     *   set Videodev.current_frame.data to acquired frame
+     *   set Videodev.current_frame.bytes_left to total size of acquired frame (> 0)
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   must not modify Videodev.current_frame
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
      * */
     int (*claim_frame)(Videodev *vd, Error **errp);
 
     /*
      * Release a previously acquired frame.
      *
-     * An implementation of release_frame must do the following
+     * An implementation of release_frame must cleanup the previously
+     * acquired frame.
      *
-     *   - set Videodev.current_frame.data to NULL
-     *   - set Videodev.current_frame.bytes_left to 0
-     *
-     * On error, release_frame must return a non-zero value and must not
-     * modify Videodev.current_frame at all.
-     *
-     * On success, it should return 0.
+     * on success:
+     *   set Videodev.current_frame.data to NULL
+     *   set Videodev.current_frame.bytes_left to 0
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   must not modify Videodev.current_frame
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
      * */
     int (*release_frame)(Videodev *vd, Error **errp);
 };

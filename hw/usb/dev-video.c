@@ -613,7 +613,7 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
     QEMUIOVector *iov = p->combined ? &p->combined->iov : &p->iov;
     size_t payload_length, packet_with_header_length;
     VideoFrameChunk frame_chunk;
-    Error *err;
+    Error *err = NULL;
     int rc;
 
     VideoImagePayloadHeader header = {
@@ -641,6 +641,7 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
 
     if (rc == VIDEODEV_RC_UNDERRUN) {
 
+        error_free(err);
         usb_video_send_empty_packet(dev, p);
         p->status = USB_RET_SUCCESS;
         return;
@@ -915,7 +916,7 @@ static int usb_video_set_control(USBDevice *dev, int request, int value,
                 val = le32_to_cpu(val);
                 ctrl.type = type;
                 ctrl.cur = val;
-                if (qemu_videodev_set_control(s->video, &ctrl, &local_err)) {
+                if (qemu_videodev_set_control(s->video, &ctrl, &local_err) != VIDEODEV_RC_OK) {
                     error_reportf_err(local_err, "%s: ", TYPE_USB_VIDEO);
                     break;
                 }
@@ -1046,7 +1047,7 @@ static void usb_video_set_streaming_altset(USBDevice *dev, int altset)
     switch (altset) {
     case ALTSET_OFF:
         {
-            if (qemu_videodev_stream_off(s->video, &local_err) != 0) {
+            if (qemu_videodev_stream_off(s->video, &local_err) != VIDEODEV_RC_OK) {
 
                 s->error = VC_ERROR_INVALID_REQUEST;
                 error_reportf_err(local_err, "%s: ", TYPE_USB_VIDEO);
@@ -1065,7 +1066,7 @@ static void usb_video_set_streaming_altset(USBDevice *dev, int altset)
                 .frame_interval = le32_to_cpu(vsc->dwFrameInterval)
             };
 
-            if (qemu_videodev_stream_on(s->video, &opts, &local_err) != 0) {
+            if (qemu_videodev_stream_on(s->video, &opts, &local_err) != VIDEODEV_RC_OK) {
 
                 s->error = VC_ERROR_INVALID_REQUEST;
                 error_reportf_err(local_err, "%s: ", TYPE_USB_VIDEO);

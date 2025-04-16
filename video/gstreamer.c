@@ -19,15 +19,15 @@ typedef struct GStreamerVideodev GStreamerVideodev;
 
 DECLARE_INSTANCE_CHECKER(GStreamerVideodev, GSTREAMER_VIDEODEV, TYPE_VIDEODEV_GSTREAMER)
 
-static void video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
+static int video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
     const char *pipeline_desc = qemu_opt_get(opts, "pipeline");
     GstPad *src_pad;
 
     if (pipeline_desc == NULL) {
-        error_setg(errp, QERR_MISSING_PARAMETER, "pipeline");
-        return;
+        vd_error_setg(vd, errp, QERR_MISSING_PARAMETER, "pipeline");
+        return VIDEODEV_RC_ERROR;
     }
 
     if (!gst_is_initialized())
@@ -36,37 +36,38 @@ static void video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
     GError *error = NULL;
     gv->pipeline = gst_parse_bin_from_description(pipeline_desc, false, &error);
     if (error) {
-        error_setg(errp, "unable to parse pipeline: %s", error->message);
-        return;
+        vd_error_setg(vd, errp, "unable to parse pipeline: %s", error->message);
+        return VIDEODEV_RC_ERROR;
     }
 
     src_pad = gst_bin_find_unlinked_pad(GST_BIN(gv->pipeline), GST_PAD_SRC);
     if (!src_pad) {
-        error_setg(errp, "pipeline has no unlinked src pad");
-        return;
+        vd_error_setg(vd, errp, "pipeline has no unlinked src pad");
+        return VIDEODEV_RC_ERROR;
     }
 
     gv->src = gst_pad_get_parent_element(src_pad);
     gst_object_unref(src_pad);
     if (!gv->src) {
-        error_setg(errp, "failed to get pipeline src element");
-        return;
+        vd_error_setg(vd, errp, "failed to get pipeline src element");
+        return VIDEODEV_RC_ERROR;
     }
 
     gv->sink = gst_element_factory_make ("appsink", "sink");
     if (!gv->sink) {
-        error_setg(errp, "failed to create appsink");
-        return;
+        vd_error_setg(vd, errp, "failed to create appsink");
+        return VIDEODEV_RC_ERROR;
     }
 
     gst_bin_add(GST_BIN(gv->pipeline), gv->sink);
 
     if (!gst_element_link(gv->src, gv->sink)) {
-        error_setg(errp, "failed to link pipeline to appsink");
-        return;
+        vd_error_setg(vd, errp, "failed to link pipeline to appsink");
+        return VIDEODEV_RC_ERROR;
     }
 
     gst_element_set_state(gv->pipeline, GST_STATE_READY);
+    return VIDEODEV_RC_OK;
 }
 
 typedef struct {
@@ -92,7 +93,7 @@ static uint32_t gst_format_to_fourcc(const char *format) {
     return 0;
 }
 
-static void video_gstreamer_enum_modes(Videodev *vd, Error **errp)
+static int video_gstreamer_enum_modes(Videodev *vd, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
     GstPad *src_pad;
@@ -109,14 +110,14 @@ static void video_gstreamer_enum_modes(Videodev *vd, Error **errp)
 
     src_pad = gst_element_get_static_pad(gv->src, "src");
     if (!src_pad) {
-        error_setg(errp, "failed to get src pad");
-        return;
+        vd_error_setg(vd, errp, "failed to get src pad");
+        return VIDEODEV_RC_ERROR;
     }
 
     src_caps = gst_pad_query_caps(src_pad, NULL);
     if (!src_caps) {
-        error_setg(errp, "failed to get capabilities from src pad");
-        return;
+        vd_error_setg(vd, errp, "failed to get capabilities from src pad");
+        return VIDEODEV_RC_ERROR;
     }
 
     for (i = 0; i < gst_caps_get_size(src_caps); i++) {
@@ -203,6 +204,8 @@ static void video_gstreamer_enum_modes(Videodev *vd, Error **errp)
             frmival->denominator = gst_value_get_fraction_denominator(framerates);
         }
     }
+
+    return VIDEODEV_RC_OK;
 }
 
 static gboolean video_gstreamer_bus_callback(GstBus *bus, GstMessage *msg, gpointer data)

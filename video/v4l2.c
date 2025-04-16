@@ -62,84 +62,99 @@ static VideoV4l2Ctrl video_v4l2_ctrl_table[] = {
 static uint32_t video_qemu_control_to_v4l2(VideodevControlType type)
 {
     for (int i = 0; i < ARRAY_SIZE(video_v4l2_ctrl_table); i++) {
-        if (video_v4l2_ctrl_table[i].q == type)
+
+        if (video_v4l2_ctrl_table[i].q == type) {
             return video_v4l2_ctrl_table[i].v;
+        }
     }
 
     return 0;
 }
 
-static void video_v4l2_parse(Videodev *vd, QemuOpts *opts, Error **errp)
+static int video_v4l2_parse(Videodev *vd, QemuOpts *opts, Error **errp)
 {
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
     const char *device = qemu_opt_get(opts, "device");
+
     if (device == NULL) {
-        error_setg(errp, QERR_MISSING_PARAMETER, "device");
+
+        vd_error_setg(vd, errp, QERR_MISSING_PARAMETER, "device");
+        return VIDEODEV_RC_ERROR;
     }
 
     vv->device_path = g_strdup(device);
+    return VIDEODEV_RC_OK;
 }
 
-static void video_v4l2_open(Videodev *vd, Error **errp)
+static int video_v4l2_open(Videodev *vd, Error **errp)
 {
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    struct v4l2_capability v4l2_cap = { 0 };
     struct stat si;
-    struct v4l2_capability v4l2_cap = {0};
 
     assert(vv->device_path);
 
-    if (-1 == stat(vv->device_path, &si)) {
-        error_setg_errno(errp, errno, "cannot identify device %s", vv->device_path);
+    if (stat(vv->device_path, &si) == -1) {
+
+        vd_error_setg(vd, errp, "cannot identify device %s", vv->device_path);
         goto error;
     }
 
     if (!S_ISCHR(si.st_mode)) {
-        error_setg(errp, "'%s' is no device", vv->device_path);
+
+        vd_error_setg(vd, errp, "'%s' is no device", vv->device_path);
         goto error;
     }
 
-    vv->fd = open(vv->device_path, O_RDWR | O_NONBLOCK);
-    if (vv->fd == -1) {
-        error_setg_errno(errp, errno, "cannot open device '%s'", vv->device_path);
+    if ((vv->fd = open(vv->device_path, O_RDWR | O_NONBLOCK)) == -1) {
+
+        vd_error_setg(vd, errp, "cannot open device '%s'", vv->device_path);
         goto error;
     }
 
-    if (-1 == ioctl(vv->fd, VIDIOC_QUERYCAP, &v4l2_cap)) {
-        if (errno == EINVAL) {
-            error_setg(errp, "device %s is no V4L2 device", vv->device_path);
-        } else {
-            error_setg_errno(errp, errno, "query device %s failed", vv->device_path);
-        }
-        goto close;
+    if (ioctl(vv->fd, VIDIOC_QUERYCAP, &v4l2_cap) == -1) {
+
+        vd_error_setg(vd, errp, "VIDIOC_QUERYCAP: %s", strerror(errno));
+        goto close_and_error;
     }
 
     if (!(v4l2_cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) ||
         !(v4l2_cap.device_caps & V4L2_CAP_VIDEO_CAPTURE)) {
-        error_setg(errp, "%s is not a video capture device", vv->device_path);
-        goto close;
+
+        vd_error_setg(vd, errp, "%s is not a video capture device", vv->device_path);
+        goto close_and_error;
     }
 
     vv->nbuffers = V4L2_BUFFER_DFL;
-    return;
+    vv->current_frame.index = -1;
 
-close:
+    return VIDEODEV_RC_OK;
+
+close_and_error:
     close(vv->fd);
 error:
     g_free(vv);
+
+    return VIDEODEV_RC_ERROR;
 }
 
-static void video_v4l2_close(Videodev *vd, Error **errp)
+static int video_v4l2_close(Videodev *vd, Error **errp)
 {
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
 
-    if (close(vv->fd) != 0)
-        error_setg_errno(errp, errno, "cannot close device '%s'", vv->device_path);
+    if (close(vv->fd) != 0) {
+
+        vd_error_setg(vd, errp, "cannot close %s", vv->device_path);
+        return VIDEODEV_RC_ERROR;
+    }
 
     g_free(vv->device_path);
     g_free(vv);
+
+    return VIDEODEV_RC_OK;
 }
 
-static void video_v4l2_enum_modes(Videodev *vd, Error **errp)
+static int video_v4l2_enum_modes(Videodev *vd, Error **errp)
 {
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
     VideoMode *mode;
@@ -152,6 +167,7 @@ static void video_v4l2_enum_modes(Videodev *vd, Error **errp)
     v4l2_fmt.type = V4L2_CAP_VIDEO_CAPTURE;
 
     for (v4l2_fmt.index = 0; ioctl(vv->fd, VIDIOC_ENUM_FMT, &v4l2_fmt) == 0; v4l2_fmt.index++) {
+
         if (!qemu_video_pixfmt_supported(v4l2_fmt.pixelformat)) {
             continue;
         }
@@ -165,8 +181,9 @@ static void video_v4l2_enum_modes(Videodev *vd, Error **errp)
         mode->nframesize = 0;
 
         v4l2_frmsz.pixel_format = v4l2_fmt.pixelformat;
+
         for (v4l2_frmsz.index = 0; ioctl(vv->fd, VIDIOC_ENUM_FRAMESIZES, &v4l2_frmsz) == 0; v4l2_frmsz.index++) {
-            /* TODO: stepwise support stepwise framesizes*/
+
             if (v4l2_frmsz.type != V4L2_FRMSIZE_TYPE_DISCRETE) {
                 continue;
             }
@@ -185,6 +202,7 @@ static void video_v4l2_enum_modes(Videodev *vd, Error **errp)
             v4l2_frmival.height = frmsz->height;
 
             for (v4l2_frmival.index = 0; ioctl(vv->fd, VIDIOC_ENUM_FRAMEINTERVALS, &v4l2_frmival) == 0; v4l2_frmival.index++) {
+
                 frmsz->nframerate++;
                 frmsz->framerates = g_realloc(frmsz->framerates, frmsz->nframerate * sizeof(VideoFramerate));
 
@@ -192,17 +210,28 @@ static void video_v4l2_enum_modes(Videodev *vd, Error **errp)
                 frmival->numerator = v4l2_frmival.discrete.numerator;
                 frmival->denominator = v4l2_frmival.discrete.denominator;
             }
+
             if (errno != EINVAL) {
-                error_setg_errno(errp, errno, "VIDIOC_ENUM_FRAMEINTERVALS");
+
+                vd_error_setg(vd, errp, "VIDIOC_ENUM_FRAMEINTERVALS: %s", strerror(errno));
+                return VIDEODEV_RC_ERROR;
             }
         }
+
         if (errno != EINVAL) {
-            error_setg_errno(errp, errno, "VIDIOC_ENUM_FRAMESIZES");
+
+            vd_error_setg(vd, errp, "VIDIOC_ENUM_FRAMESIZES: %s", strerror(errno));
+            return VIDEODEV_RC_ERROR;
         }
     }
+
     if (errno != EINVAL) {
-        error_setg_errno(errp, errno, "VIDIOC_ENUM_FMT");
+
+        vd_error_setg(vd, errp, "VIDIOC_ENUM_FMT: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
+
+    return VIDEODEV_RC_OK;
 }
 
 static int video_v4l2_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
@@ -211,29 +240,31 @@ static int video_v4l2_set_control(Videodev *vd, VideodevControl *ctrl, Error **e
     struct v4l2_control v4l2_ctrl;
     uint32_t cid;
 
-    cid = video_qemu_control_to_v4l2(ctrl->type);
-    if (!cid) {
-        error_setg(errp, "unsupported control type %d", ctrl->type);
-        return -EINVAL;
+    if ((cid = video_qemu_control_to_v4l2(ctrl->type)) == 0) {
+
+        vd_error_setg(vd, errp, "unsupported control type %d", ctrl->type);
+        return VIDEODEV_RC_INVAL;
     }
 
-    v4l2_ctrl.id = cid;
+    v4l2_ctrl.id    = cid;
     v4l2_ctrl.value = ctrl->cur;
 
     if (ioctl(vv->fd, VIDIOC_S_CTRL, &v4l2_ctrl) < 0) {
-        error_setg(errp, "VIDIOC_S_CTRL on %s failed: %s", vv->device_path, strerror(errno));
-        return -errno;
+
+        vd_error_setg(vd, errp, "VIDIOC_S_CTRL: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
 
-    return 0;
+    return VIDEODEV_RC_OK;
 }
 
 // @private
-static int video_v4l2_qbuf(Videodev *vd, const int index) {
-
+static int video_v4l2_qbuf(Videodev *vd, const int index)
+{
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
 
     struct v4l2_buffer buf = {
+
         .index  = index,
         .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
         .field  = V4L2_FIELD_ANY,
@@ -244,29 +275,32 @@ static int video_v4l2_qbuf(Videodev *vd, const int index) {
 }
 
 // @private
-static int video_v4l2_dqbuf(Videodev *vd, int *index) {
-
+static int video_v4l2_dqbuf(Videodev *vd, int *index)
+{
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
     int ioctl_status = 0;
 
     struct v4l2_buffer buf = {
+
         .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
         .memory = V4L2_MEMORY_MMAP
     };
 
-    if ((ioctl_status = ioctl(vv->fd, VIDIOC_DQBUF, &buf)) < 0)
+    if ((ioctl_status = ioctl(vv->fd, VIDIOC_DQBUF, &buf)) < 0) {
         return ioctl_status;
+    }
 
     *index = buf.index;
     return ioctl_status;
 }
 
 // @private
-static void video_v4l2_free_buffers(Videodev *vd) {
-
+static void video_v4l2_free_buffers(Videodev *vd)
+{
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
 
     struct v4l2_requestbuffers v4l2_reqbufs = {
+
         .count  = 0,
         .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
         .memory = V4L2_MEMORY_MMAP
@@ -282,12 +316,14 @@ static void video_v4l2_free_buffers(Videodev *vd) {
 
         V4l2Buffer *current_buf = &vv->buffers[i];
 
-        if (current_buf->addr == NULL)
+        if (current_buf->addr == NULL) {
             continue;
+        }
 
         munmap(current_buf->addr, current_buf->length);
 
-        *current_buf = (V4l2Buffer) { // todo: check if vv.buffers need init at construction
+        *current_buf = (V4l2Buffer) {
+
             .addr   = NULL,
             .length = 0
         };
@@ -297,24 +333,27 @@ static void video_v4l2_free_buffers(Videodev *vd) {
 }
 
 // @private
-static int video_v4l2_setup_buffers(Videodev *vd, Error **errp) {
-
+static int video_v4l2_setup_buffers(Videodev *vd, Error **errp)
+{
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
 
     struct v4l2_requestbuffers v4l2_reqbufs = {
+
         .count  = vv->nbuffers,
         .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
         .memory = V4L2_MEMORY_MMAP
     };
 
     if (ioctl(vv->fd, VIDIOC_REQBUFS, &v4l2_reqbufs) < 0) {
-        error_setg_errno(errp, errno, "VIDIOC_REQBUFS");
-        return -1;
+
+        vd_error_setg(vd, errp, "VIDIOC_REQBUFS: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
 
     for (int i = 0; i < vv->nbuffers; i++) {
 
         struct v4l2_buffer v4l2_buf = {
+
             .index  = i,
             .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,
             .memory = V4L2_MEMORY_MMAP,
@@ -322,23 +361,27 @@ static int video_v4l2_setup_buffers(Videodev *vd, Error **errp) {
         };
 
         if (ioctl(vv->fd, VIDIOC_QUERYBUF, &v4l2_buf) < 0) {
-            error_setg_errno(errp, errno, "VIDIOC_QUERYBUF");
+
+            vd_error_setg(vd, errp, "VIDIOC_QUERYBUF: %s", strerror(errno));
             goto video_v4l2_setup_buffers_error;
         }
 
-        if (v4l2_buf.type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+        if (v4l2_buf.type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
             continue;
+        }
 
         void *addr = mmap(NULL, v4l2_buf.length, PROT_READ | PROT_WRITE,
                           MAP_SHARED, vv->fd, v4l2_buf.m.offset);
 
         if (addr == MAP_FAILED) {
-            error_setg_errno(errp, errno, "mmap failure");
+
+            vd_error_setg(vd, errp, "mmap: %s", strerror(errno));
             goto video_v4l2_setup_buffers_error;
         }
 
         if (video_v4l2_qbuf(vd, i) < 0) {
-            error_setg_errno(errp, errno, "VIDIOC_QBUF");
+
+            vd_error_setg(vd, errp, "VIDIOC_QBUF: %s", strerror(errno));
             goto video_v4l2_setup_buffers_error;
         }
 
@@ -346,16 +389,16 @@ static int video_v4l2_setup_buffers(Videodev *vd, Error **errp) {
         vv->buffers[i].length = v4l2_buf.length;
     }
 
-    return 0;
+    return VIDEODEV_RC_OK;
 
 video_v4l2_setup_buffers_error:
     video_v4l2_free_buffers(vd);
-    return -1;
+    return VIDEODEV_RC_ERROR;
 }
 
 // @private
-static int video_v4l2_set_streaming_param(Videodev *vd, Error **errp) {
-
+static int video_v4l2_set_streaming_param(Videodev *vd, Error **errp)
+{
     struct v4l2_streamparm   stream_param;
     struct v4l2_captureparm* capture_param;
     V4l2Videodev*            vv = V4L2_VIDEODEV(vd);
@@ -367,110 +410,122 @@ static int video_v4l2_set_streaming_param(Videodev *vd, Error **errp) {
     capture_param->timeperframe.denominator = vd->selected.frmrt.denominator;
 
     if (ioctl(vv->fd, VIDIOC_S_PARM, &stream_param) < 0) {
-        error_setg_errno(errp, errno, "VIDIOC_S_PARM");
-        return -1;
+
+        vd_error_setg(vd, errp, "VIDIOC_S_PARM: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
 
-    return 0;
+    return VIDEODEV_RC_OK;
 }
 
 // @private
-static int video_v4l2_set_format(Videodev *vd, Error **errp) {
+static int video_v4l2_set_format(Videodev *vd, Error **errp)
+{
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
 
-    struct v4l2_format fmt;
-    V4l2Videodev*      vv = V4L2_VIDEODEV(vd);
+    struct v4l2_format fmt = {
 
-    memset(&fmt, 0, sizeof(fmt));
-
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = vd->selected.frmsz->width;
-    fmt.fmt.pix.height = vd->selected.frmsz->height;
-    fmt.fmt.pix.pixelformat = vd->selected.mode->pixelformat;
-    fmt.fmt.pix.field = V4L2_FIELD_NONE;
+        .type                = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .fmt.pix.width       = vd->selected.frmsz->width,
+        .fmt.pix.height      = vd->selected.frmsz->height,
+        .fmt.pix.pixelformat = vd->selected.mode->pixelformat,
+        .fmt.pix.field       = V4L2_FIELD_NONE
+    };
 
     if (ioctl(vv->fd, VIDIOC_S_FMT, &fmt) < 0) {
-        error_setg_errno(errp, errno, "VIDIOC_S_FMT");
-        return -1;
+
+        vd_error_setg(vd, errp, "VIDIOC_S_FMT: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
 
     if (ioctl(vv->fd, VIDIOC_G_FMT, &fmt) < 0) {
-        error_setg_errno(errp, errno, "VIDIOC_G_FMT");
-        return -1;
+
+        vd_error_setg(vd, errp, "VIDIOC_G_FMT: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
 
-    return 0;
+    return VIDEODEV_RC_OK;
 }
 
-static int video_v4l2_stream_on(Videodev *vd, Error **errp) {
-
+static int video_v4l2_stream_on(Videodev *vd, Error **errp)
+{
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
-    if (video_v4l2_set_format(vd, errp) != 0)
-        return -1;
+    if (video_v4l2_set_format(vd, errp) != VIDEODEV_RC_OK) {
+        return VIDEODEV_RC_ERROR;
+    }
 
-    if (video_v4l2_set_streaming_param(vd, errp) != 0)
-        return -1;
+    if (video_v4l2_set_streaming_param(vd, errp) != VIDEODEV_RC_OK) {
+        return VIDEODEV_RC_ERROR;
+    }
 
-    if (video_v4l2_setup_buffers(vd, errp) != 0)
-        return -1;
+    if (video_v4l2_setup_buffers(vd, errp) != VIDEODEV_RC_OK) {
+        return VIDEODEV_RC_ERROR;
+    }
 
     if (ioctl(vv->fd, VIDIOC_STREAMON, &type) < 0) {
 
         video_v4l2_free_buffers(vd);
-        error_setg_errno(errp, errno, "VIDIOC_STREAMON");
-        return -1;
+        vd_error_setg(vd, errp, "VIDIOC_STREAMON: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
 
-    return 0;
+    return VIDEODEV_RC_OK;
 }
 
-static int video_v4l2_stream_off(Videodev *vd, Error **errp) {
-
+static int video_v4l2_stream_off(Videodev *vd, Error **errp)
+{
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    int retval = 0;
 
     if (ioctl(vv->fd, VIDIOC_STREAMOFF, &type) < 0) {
-        error_setg_errno(errp, errno, "VIDIOC_STREAMOFF");
-        retval = -1;
+
+        vd_error_setg(vd, errp, "VIDIOC_STREAMOFF: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
 
     video_v4l2_free_buffers(vd);
-    return retval;
+    return VIDEODEV_RC_OK;
 }
 
-static int video_v4l2_claim_frame(Videodev *vd, Error **errp) {
-
-    V4l2Videodev* vv = V4L2_VIDEODEV(vd);
+static int video_v4l2_claim_frame(Videodev *vd, Error **errp)
+{
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
 
     if (video_v4l2_dqbuf(vd, &vv->current_frame.index) < 0) {
 
-        error_setg_errno(errp, errno, "VIDIOC_DQBUF");
-        return -errno;
+        if (errno == EAGAIN) {
+
+            vd_error_setg(vd, errp, "VIDIOC_DQBUF: underrun");
+            return VIDEODEV_RC_UNDERRUN;
+        }
+
+        vd_error_setg(vd, errp, "VIDIOC_DQBUF: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
 
     vd->current_frame.data       = vv->buffers[vv->current_frame.index].addr;
     vd->current_frame.bytes_left = vv->buffers[vv->current_frame.index].length;
 
-    return 0;
+    return VIDEODEV_RC_OK;
 }
 
-static int video_v4l2_release_frame(Videodev *vd, Error **errp) {
-
-    V4l2Videodev* vv = V4L2_VIDEODEV(vd);
+static int video_v4l2_release_frame(Videodev *vd, Error **errp)
+{
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
 
     if (video_v4l2_qbuf(vd, vv->current_frame.index) < 0) {
 
-        error_setg_errno(errp, errno, "VIDIOC_QBUF");
-        return -errno;
+        vd_error_setg(vd, errp, "VIDIOC_QBUF: %s", strerror(errno));
+        return VIDEODEV_RC_ERROR;
     }
 
     vv->current_frame.index      = -1;
     vd->current_frame.data       = NULL;
     vd->current_frame.bytes_left = 0;
 
-    return 0;
+    return VIDEODEV_RC_OK;
 }
 
 static void video_v4l2_class_init(ObjectClass *oc, void *data)
@@ -495,8 +550,8 @@ static const TypeInfo video_v4l2_type_info = {
     .class_init = video_v4l2_class_init,
 };
 
-static void register_types(void)
-{
+static void register_types(void) {
+
     type_register_static(&video_v4l2_type_info);
 }
 
