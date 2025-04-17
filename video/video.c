@@ -240,7 +240,7 @@ int qemu_videodev_delete(Videodev *vd, Error **errp)
     return VIDEODEV_RC_OK;
 }
 
-int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
+int qemu_videodev_set_control(Videodev *vd, VideoControl *ctrl, Error **errp)
 {
     VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
 

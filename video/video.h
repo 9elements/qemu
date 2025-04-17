@@ -27,18 +27,18 @@
 #define QEMU_VIDEO_PIX_FMT_MJPEG  fourcc_code('M', 'J', 'P', 'G')
 #define QEMU_VIDEO_PIX_FMT_RGB565 fourcc_code('R', 'G', 'B', 'P')
 
-typedef enum VideodevControlType {
-    VideodevBrightness,
-    VideodevContrast,
-    VideodevGain,
-    VideodevGamma,
-    VideodevHue,
-    VideodevHueAuto,
-    VideodevSaturation,
-    VideodevSharpness,
-    VideodevWhiteBalanceTemperature,
-    VideodevControlMax
-} VideodevControlType;
+typedef enum VideoControlType {
+    VideoControlTypeBrightness,
+    VideoControlTypeContrast,
+    VideoControlTypeGain,
+    VideoControlTypeGamma,
+    VideoControlTypeHue,
+    VideoControlTypeHueAuto,
+    VideoControlTypeSaturation,
+    VideoControlTypeSharpness,
+    VideoControlTypeWhiteBalanceTemperature,
+    VideoControlTypeMax
+} VideoControlType;
 
 static inline bool qemu_video_pixfmt_supported(uint32_t pixfmt)
 {
@@ -51,14 +51,14 @@ static inline bool qemu_video_pixfmt_supported(uint32_t pixfmt)
     return false;
 }
 
-typedef struct VideodevControl {
-    VideodevControlType type;
+typedef struct VideoControl {
+    VideoControlType type;
     int32_t cur;
     int32_t def;
     int32_t min;
     int32_t max;
     int32_t step;
-} VideodevControl;
+} VideoControl;
 
 typedef struct VideoFramerate {
     uint32_t numerator;
@@ -178,7 +178,7 @@ struct VideodevClass {
      *   returns no VIDEODEV_RC_OK
      *   sets @errp accordingly
      * */
-    int (*set_control)(Videodev *vd, VideodevControl *ctrl, Error **errp);
+    int (*set_control)(Videodev *vd, VideoControl *ctrl, Error **errp);
 
     /*
      * Start video capture stream
@@ -251,7 +251,7 @@ struct VideodevClass {
 
 Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp);
 int qemu_videodev_delete(Videodev *vd, Error **errp);
-int qemu_videodev_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp);
+int qemu_videodev_set_control(Videodev *vd, VideoControl *ctrl, Error **errp);
 bool qemu_videodev_check_options(Videodev *vd, VideoStreamOptions *opts);
 int qemu_videodev_stream_on(Videodev *vd, VideoStreamOptions *opts, Error **errp);
 int qemu_videodev_stream_off(Videodev *vd, Error **errp);

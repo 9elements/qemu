@@ -540,30 +540,30 @@ static void usb_video_desc_free(USBDevice *dev)
     dev->usb_desc = NULL;
 }
 
-static VideodevControlType usb_video_pu_control_type_to_qemu(uint8_t cs)
+static VideoControlType usb_video_pu_control_type_to_qemu(uint8_t cs)
 {
     switch (cs) {
     case PU_BRIGHTNESS_CONTROL:
-        return VideodevBrightness;
+        return VideoControlTypeBrightness;
     case PU_CONTRAST_CONTROL:
-        return VideodevContrast;
+        return VideoControlTypeContrast;
     case PU_GAIN_CONTROL:
-        return VideodevGain;
+        return VideoControlTypeGain;
     case PU_GAMMA_CONTROL:
-        return VideodevGamma;
+        return VideoControlTypeGamma;
     case PU_HUE_CONTROL:
-        return VideodevHue;
+        return VideoControlTypeHue;
     case PU_HUE_AUTO_CONTROL:
-        return VideodevHueAuto;
+        return VideoControlTypeHueAuto;
     case PU_SATURATION_CONTROL:
-        return VideodevSaturation;
+        return VideoControlTypeSaturation;
     case PU_SHARPNESS_CONTROL:
-        return VideodevSharpness;
+        return VideoControlTypeSharpness;
     case PU_WHITE_BALANCE_TEMPERATURE_CONTROL:
-        return VideodevWhiteBalanceTemperature;
+        return VideoControlTypeWhiteBalanceTemperature;
     }
 
-    return VideodevControlMax;
+    return VideoControlTypeMax;
 }
 
 static void usb_video_handle_data_control_in(USBDevice *dev, USBPacket *p)
@@ -843,7 +843,7 @@ static int usb_video_get_control(USBDevice *dev, int request, int value,
 
         case PROCESSING_UNIT:
             {
-                VideodevControlType t = usb_video_pu_control_type_to_qemu(cs);
+                VideoControlType t = usb_video_pu_control_type_to_qemu(cs);
                 handle_get_control(s->pu_attrs, req, t, length, data, ret);
             }
             break;
@@ -899,12 +899,12 @@ static int usb_video_set_control(USBDevice *dev, int request, int value,
         case PROCESSING_UNIT:
             {
                 uint32_t val = 0;
-                VideodevControl ctrl;
-                VideodevControlType type;
+                VideoControl ctrl;
+                VideoControlType type;
                 Error *local_err = NULL;
 
                 type = usb_video_pu_control_type_to_qemu(cs);
-                if (type == VideodevControlMax) {
+                if (type == VideoControlTypeMax) {
                     break;
                 }
 

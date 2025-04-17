@@ -34,32 +34,32 @@ typedef struct V4l2Videodev V4l2Videodev;
 DECLARE_INSTANCE_CHECKER(V4l2Videodev, V4L2_VIDEODEV, TYPE_VIDEODEV_V4L2)
 
 typedef struct VideoV4l2Ctrl {
-    VideodevControlType q;
+    VideoControlType q;
     uint32_t v;
 } VideoV4l2Ctrl;
 
 static VideoV4l2Ctrl video_v4l2_ctrl_table[] = {
-    { .q = VideodevBrightness,
+    { .q = VideoControlTypeBrightness,
       .v = V4L2_CID_BRIGHTNESS },
-    { .q = VideodevContrast,
+    { .q = VideoControlTypeContrast,
       .v = V4L2_CID_CONTRAST },
-    { .q = VideodevGain,
+    { .q = VideoControlTypeGain,
       .v = V4L2_CID_GAIN },
-    { .q = VideodevGamma,
+    { .q = VideoControlTypeGamma,
       .v = V4L2_CID_GAMMA },
-    { .q = VideodevHue,
+    { .q = VideoControlTypeHue,
       .v = V4L2_CID_HUE },
-    { .q = VideodevHueAuto,
+    { .q = VideoControlTypeHueAuto,
       .v = V4L2_CID_HUE_AUTO },
-    { .q = VideodevSaturation,
+    { .q = VideoControlTypeSaturation,
       .v = V4L2_CID_SATURATION },
-    { .q = VideodevSharpness,
+    { .q = VideoControlTypeSharpness,
       .v = V4L2_CID_SHARPNESS },
-    { .q = VideodevWhiteBalanceTemperature,
+    { .q = VideoControlTypeWhiteBalanceTemperature,
       .v = V4L2_CID_WHITE_BALANCE_TEMPERATURE },
 };
 
-static uint32_t video_qemu_control_to_v4l2(VideodevControlType type)
+static uint32_t video_qemu_control_to_v4l2(VideoControlType type)
 {
     for (int i = 0; i < ARRAY_SIZE(video_v4l2_ctrl_table); i++) {
 
@@ -234,7 +234,7 @@ static int video_v4l2_enum_modes(Videodev *vd, Error **errp)
     return VIDEODEV_RC_OK;
 }
 
-static int video_v4l2_set_control(Videodev *vd, VideodevControl *ctrl, Error **errp)
+static int video_v4l2_set_control(Videodev *vd, VideoControl *ctrl, Error **errp)
 {
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
     struct v4l2_control v4l2_ctrl;
