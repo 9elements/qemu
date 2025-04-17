@@ -5,6 +5,7 @@
 #include "video/video.h"
 
 #include <gst/gst.h>
+#include <gst/app/gstappsink.h>
 
 #define TYPE_VIDEODEV_GSTREAMER TYPE_VIDEODEV"-gstreamer"
 
@@ -14,6 +15,12 @@ struct GStreamerVideodev {
     GstElement *pipeline;
     GstElement *src;
     GstElement *sink;
+
+    struct GStreamerVideoFrame {
+        GstSample *sample;
+        GstBuffer *buffer;
+        GstMapInfo map_info;
+    } current_frame;
 };
 typedef struct GStreamerVideodev GStreamerVideodev;
 
@@ -208,63 +215,109 @@ static int video_gstreamer_enum_modes(Videodev *vd, Error **errp)
     return VIDEODEV_RC_OK;
 }
 
-static gboolean video_gstreamer_bus_callback(GstBus *bus, GstMessage *msg, gpointer data)
-{
-    // todo: handle and log gstreamer errors
-
-    switch (GST_MESSAGE_TYPE(msg)) {
-
-        case GST_MESSAGE_ERROR: {
-
-            break;
-        }
-
-        case GST_MESSAGE_EOS: {
-
-            break;
-        }
-
-        default:
-            break;
-    }
-
-    return TRUE;
-}
-
 static int video_gstreamer_stream_on(Videodev *vd, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
     GstStateChangeReturn ret;
-    GstBus *bus;
 
-    if (!gv || !gv->pipeline) {
-        error_setg(errp, "GStreamer pipeline not initialized!");
-        return -1;
+    if (gv->pipeline == NULL) {
+
+        vd_error_setg(vd, errp, "GStreamer pipeline not initialized!");
+        return VIDEODEV_RC_ERROR;
     }
 
     ret = gst_element_set_state(gv->pipeline, GST_STATE_PLAYING);
 
     if (ret == GST_STATE_CHANGE_FAILURE) {
-        error_setg(errp, "Failed to start GStreamer pipeline!");
-        return -1;
+
+        vd_error_setg(vd, errp, "failed to start GStreamer pipeline!");
+        return VIDEODEV_RC_ERROR;
     }
 
-    bus = gst_element_get_bus(gv->pipeline);
-    gst_bus_add_watch(bus, video_gstreamer_bus_callback, NULL);
-    gst_object_unref(bus);
+    return VIDEODEV_RC_OK;
+}
 
-    // todo: capture frames
+static int video_gstreamer_stream_off(Videodev *vd, Error **errp)
+{
+    GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
+    GstStateChangeReturn ret;
 
-    return 0;
+    if (gv->pipeline == NULL) {
+
+        vd_error_setg(vd, errp, "GStreamer pipeline not initialized!");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    ret = gst_element_set_state(gv->pipeline, GST_STATE_READY);
+
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+
+        vd_error_setg(vd, errp, "failed to stop GStreamer pipeline!");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    return VIDEODEV_RC_OK;
+}
+
+static int video_gstreamer_claim_frame(Videodev *vd, Error **errp)
+{
+    GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
+    GstSample *sample;
+    GstBuffer *buffer;
+
+    if ((sample = gst_app_sink_try_pull_sample(GST_APP_SINK(gv->sink), 0)) == NULL) {
+
+        vd_error_setg(vd, errp, "appsink: underrun");
+        return VIDEODEV_RC_UNDERRUN;
+    }
+
+    if ((buffer = gst_sample_get_buffer(sample)) == NULL) {
+
+        gst_sample_unref(sample);
+        vd_error_setg(vd, errp, "could not retrieve sample buffer");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    if (gst_buffer_map(buffer, &gv->current_frame.map_info, GST_MAP_READ) != TRUE) {
+
+        gst_sample_unref(sample);
+        vd_error_setg(vd, errp, "could not map sample buffer");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    gv->current_frame.sample     = sample;
+    gv->current_frame.buffer     = buffer;
+    vd->current_frame.data       = (uint8_t*) gv->current_frame.map_info.data;
+    vd->current_frame.bytes_left = gv->current_frame.map_info.size;
+
+    return VIDEODEV_RC_OK;
+}
+
+static int video_gstreamer_release_frame(Videodev *vd, Error **errp)
+{
+    GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
+
+    gst_buffer_unmap(gv->current_frame.buffer, &gv->current_frame.map_info);
+    gst_sample_unref(gv->current_frame.sample);
+
+    gv->current_frame.sample     = NULL;
+    gv->current_frame.buffer     = NULL;
+    vd->current_frame.data       = NULL;
+    vd->current_frame.bytes_left = 0;
+
+    return VIDEODEV_RC_OK;
 }
 
 static void video_gstreamer_class_init(ObjectClass *oc, void *data)
 {
     VideodevClass *vc = VIDEODEV_CLASS(oc);
 
-    vc->parse = video_gstreamer_parse;
-    vc->enum_modes = video_gstreamer_enum_modes;
-    vc->stream_on = video_gstreamer_stream_on;
+    vc->parse         = video_gstreamer_parse;
+    vc->enum_modes    = video_gstreamer_enum_modes;
+    vc->stream_on     = video_gstreamer_stream_on;
+    vc->stream_off    = video_gstreamer_stream_off;
+    vc->claim_frame   = video_gstreamer_claim_frame;
+    vc->release_frame = video_gstreamer_release_frame;
 }
 
 static const TypeInfo video_v4l2_type_info = {
