@@ -26,6 +26,42 @@ typedef struct GStreamerVideodev GStreamerVideodev;
 
 DECLARE_INSTANCE_CHECKER(GStreamerVideodev, GSTREAMER_VIDEODEV, TYPE_VIDEODEV_GSTREAMER)
 
+typedef struct VideoGStreamerCtrl {
+    VideoControlType q;
+    const char *v;
+} VideoGStreamerCtrl;
+
+static VideoGStreamerCtrl video_gstreamer_ctrl_table[] = {
+    {
+        .q = VideoControlTypeBrightness,
+        .v = "brightness"
+    },
+    {
+        .q = VideoControlTypeContrast,
+        .v = "contrast"
+    },
+    {
+        .q = VideoControlTypeHue,
+        .v = "hue"
+    },
+    {
+        .q = VideoControlTypeSaturation,
+        .v = "saturation"
+    }
+};
+
+static const char *video_qemu_control_to_gstreamer(VideoControlType type)
+{
+    for (int i = 0; i < ARRAY_SIZE(video_gstreamer_ctrl_table); i++) {
+
+        if (video_gstreamer_ctrl_table[i].q == type) {
+            return video_gstreamer_ctrl_table[i].v;
+        }
+    }
+
+    return NULL;
+}
+
 static int video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
@@ -308,6 +344,30 @@ static int video_gstreamer_release_frame(Videodev *vd, Error **errp)
     return VIDEODEV_RC_OK;
 }
 
+static int video_gstreamer_set_control(Videodev *vd, VideoControl *ctrl, Error **errp)
+{
+    GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
+    const char *property;
+    int value;
+
+    if ((property = video_qemu_control_to_gstreamer(ctrl->type)) == NULL) {
+
+        vd_error_setg(vd, errp, "invalid control property!");
+        return VIDEODEV_RC_INVAL;
+    }
+
+    g_object_set(G_OBJECT(gv->src), property, ctrl->cur, NULL);
+    g_object_get(G_OBJECT(gv->src), property, &value, NULL);
+
+    if (value != ctrl->cur) {
+
+        vd_error_setg(vd, errp, "could not apply new setting for '%s'", property);
+        return VIDEODEV_RC_INVAL;
+    }
+
+    return VIDEODEV_RC_OK;
+}
+
 static void video_gstreamer_class_init(ObjectClass *oc, void *data)
 {
     VideodevClass *vc = VIDEODEV_CLASS(oc);
@@ -318,6 +378,7 @@ static void video_gstreamer_class_init(ObjectClass *oc, void *data)
     vc->stream_off    = video_gstreamer_stream_off;
     vc->claim_frame   = video_gstreamer_claim_frame;
     vc->release_frame = video_gstreamer_release_frame;
+    vc->set_control   = video_gstreamer_set_control;
 }
 
 static const TypeInfo video_v4l2_type_info = {
