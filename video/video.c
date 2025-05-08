@@ -209,6 +209,13 @@ Videodev *qemu_videodev_new_from_opts(QemuOpts *opts, Error **errp)
         goto error;
     }
 
+    if (vc->enum_controls) {
+
+        if (vc->enum_controls(vd, &local_err) != VIDEODEV_RC_OK) {
+            goto error;
+        }
+    }
+
     QLIST_INSERT_HEAD(&videodevs, vd, list);
     return vd;
 
@@ -255,7 +262,7 @@ int qemu_videodev_set_control(Videodev *vd, VideoControl *ctrl, Error **errp)
 
 bool qemu_videodev_check_options(Videodev *vd, VideoStreamOptions *opts)
 {
-    if (opts->format_index >= vd->nmode)
+    if (opts->format_index >= vd->nmodes)
         return false;
 
     if (opts->frame_index >= vd->modes[opts->format_index].nframesize)
@@ -310,8 +317,8 @@ int qemu_videodev_stream_on(Videodev *vd, VideoStreamOptions *opts, Error **errp
     return VIDEODEV_RC_OK;
 }
 
-int qemu_videodev_stream_off(Videodev *vd, Error **errp) {
-
+int qemu_videodev_stream_off(Videodev *vd, Error **errp)
+{
     VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
     int rc;
 
@@ -337,14 +344,15 @@ int qemu_videodev_stream_off(Videodev *vd, Error **errp) {
     return VIDEODEV_RC_OK;
 }
 
-int qemu_videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp) {
-
+int qemu_videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp)
+{
     int rc;
 
     if (videodev_frame_ready(vd) == false) {
 
-        if ((rc = videodev_claim_frame(vd, errp)) != VIDEODEV_RC_OK)
+        if ((rc = videodev_claim_frame(vd, errp)) != VIDEODEV_RC_OK) {
             return rc;
+        }
     }
 
     chunk->size = MIN(vd->current_frame.bytes_left, upto);
@@ -353,10 +361,18 @@ int qemu_videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *c
     vd->current_frame.data        = vd->current_frame.data + chunk->size;
     vd->current_frame.bytes_left -= chunk->size;
 
+    return VIDEODEV_RC_OK;
+}
+
+int qemu_videodev_read_frame_done(Videodev *vd, Error **errp)
+{
+    int rc;
+
     if (vd->current_frame.bytes_left == 0) {
 
-        if ((rc = videodev_release_frame(vd, errp)) != VIDEODEV_RC_OK)
+        if ((rc = videodev_release_frame(vd, errp)) != VIDEODEV_RC_OK) {
             return rc;
+        }
     }
 
     return VIDEODEV_RC_OK;

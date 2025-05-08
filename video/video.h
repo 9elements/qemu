@@ -99,8 +99,11 @@ struct Videodev {
     bool registered;
     bool is_streaming;
 
-    int nmode;
+    int nmodes;
     VideoMode *modes;
+
+    int ncontrols;
+    VideoControl *controls;
 
     struct SelectedStreamOptions {
         VideoMode *mode;
@@ -170,7 +173,23 @@ struct VideodevClass {
     int (*enum_modes)(Videodev *vd, Error **errp);
 
     /*
-     * Set control
+     * [optional]
+     * Enumerate camera controls
+     *
+     * Allocates and populates Videodev.controls
+     *
+     * on success:
+     *   creates and populates Videodev.controls
+     *   returns VIDEODEV_RC_OK
+     * on failure:
+     *   returns no VIDEODEV_RC_OK
+     *   sets @errp accordingly
+     * */
+    int (*enum_controls)(Videodev *vd, Error **errp);
+
+    /*
+     * [optional]
+     * Set camera control settings
      *
      * on success:
      *   returns VIDEODEV_RC_OK
@@ -256,6 +275,7 @@ bool qemu_videodev_check_options(Videodev *vd, VideoStreamOptions *opts);
 int qemu_videodev_stream_on(Videodev *vd, VideoStreamOptions *opts, Error **errp);
 int qemu_videodev_stream_off(Videodev *vd, Error **errp);
 int qemu_videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp);
+int qemu_videodev_read_frame_done(Videodev *vd, Error **errp);
 size_t qemu_videodev_current_frame_length(Videodev *vd);
 
 /* ====== */

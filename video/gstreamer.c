@@ -200,7 +200,7 @@ static int video_gstreamer_enum_modes(Videodev *vd, Error **errp)
         framerates = gst_structure_get_value(s, "framerate");
 
         mode = NULL;
-        for (j = 0;j < vd->nmode; j++) {
+        for (j = 0;j < vd->nmodes; j++) {
             if (vd->modes[j].pixelformat == pixelformat) {
                 mode = &vd->modes[j];
                 break;
@@ -208,9 +208,9 @@ static int video_gstreamer_enum_modes(Videodev *vd, Error **errp)
         }
 
         if (!mode) {
-            vd->nmode++;
-            vd->modes = g_realloc(vd->modes, vd->nmode * sizeof(VideoMode));
-            mode = &vd->modes[vd->nmode - 1];
+            vd->nmodes++;
+            vd->modes = g_realloc(vd->modes, vd->nmodes * sizeof(VideoMode));
+            mode = &vd->modes[vd->nmodes - 1];
             mode->pixelformat = pixelformat;
             mode->framesizes = NULL;
             mode->nframesize = 0;
@@ -230,21 +230,25 @@ static int video_gstreamer_enum_modes(Videodev *vd, Error **errp)
                 const GValue *value = gst_value_list_get_value(framerates, j);
 
                 if (GST_VALUE_HOLDS_FRACTION(value)) {
+
                     frmsz->nframerate++;
                     frmsz->framerates = g_realloc(frmsz->framerates, frmsz->nframerate * sizeof(VideoFramerate));
-
                     frmival = &frmsz->framerates[frmsz->nframerate - 1];
-                    frmival->numerator = gst_value_get_fraction_numerator(value);
-                    frmival->denominator = gst_value_get_fraction_denominator(value);
+
+                    /* intentionally swapped */
+                    frmival->denominator = gst_value_get_fraction_numerator(value);
+                    frmival->numerator = gst_value_get_fraction_denominator(value);
                 }
             }
         } else if (GST_VALUE_HOLDS_FRACTION(framerates)) {
+
             frmsz->nframerate++;
             frmsz->framerates = g_realloc(frmsz->framerates, frmsz->nframerate * sizeof(VideoFramerate));
-
             frmival = &frmsz->framerates[frmsz->nframerate - 1];
-            frmival->numerator = gst_value_get_fraction_numerator(framerates);
-            frmival->denominator = gst_value_get_fraction_denominator(framerates);
+
+            /* intentionally swapped */
+            frmival->denominator = gst_value_get_fraction_numerator(framerates);
+            frmival->numerator = gst_value_get_fraction_denominator(framerates);
         }
     }
 

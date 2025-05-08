@@ -9,7 +9,8 @@
  *   Marcello Sylvester Bauer <marcello.bauer@9elements.com>
  *   zhenwei pi <pizhenwei@bytedance.com>
  *
- * This work is licensed under the terms of the GNU GPL, version 2 or later. See the COPYING file in the top-level directory.
+ * This work is licensed under the terms of the GNU GPL, version 2 or later.
+ * See the COPYING file in the top-level directory.
  */
 
 #include "qemu/osdep.h"
@@ -31,6 +32,13 @@ enum AttributeIndex {
     ATTRIBUTE_CUR,
     ATTRIBUTE_RES,
     ATTRIBUTE_ALL
+};
+
+enum video_desc_iface_idx {
+    VC = 0,
+    VS0,
+    VS1,
+    USB_VIDEO_IFACE_COUNT
 };
 
 typedef struct USBVideoControlStats {
@@ -98,8 +106,11 @@ enum usb_video_strings {
     STR_PRODUCT,
     STR_SERIALNUMBER,
     STR_CONFIG,
+    STR_INTERFACE_ASSOCIATION,
     STR_VIDEO_CONTROL,
     STR_INPUT_TERMINAL,
+    STR_SELECTOR_UNIT,
+    STR_PROCESSING_UNIT,
     STR_OUTPUT_TERMINAL,
     STR_VIDEO_STREAMING,
     STR_VIDEO_STREAMING_ALTERNATE1,
@@ -110,8 +121,11 @@ static const USBDescStrings usb_video_stringtable = {
     [STR_PRODUCT]                    = "QEMU USB Video",
     [STR_SERIALNUMBER]               = "1",
     [STR_CONFIG]                     = "Video Configuration",
+    [STR_INTERFACE_ASSOCIATION]      = "Integrated Camera",
     [STR_VIDEO_CONTROL]              = "Video Control",
     [STR_INPUT_TERMINAL]             = "Video Input Terminal",
+    [STR_SELECTOR_UNIT]              = "Video Selector Unit",
+    [STR_PROCESSING_UNIT]            = "Video Processing Unit",
     [STR_OUTPUT_TERMINAL]            = "Video Output Terminal",
     [STR_VIDEO_STREAMING]            = "Video Streaming",
     [STR_VIDEO_STREAMING_ALTERNATE1] = "Video Streaming Alternate Setting 1",
@@ -192,6 +206,7 @@ static const USBDescIfaceAssoc desc_if_groups[] = {
         .bFunctionClass = USB_CLASS_VIDEO,
         .bFunctionSubClass = SC_VIDEO_INTERFACE_COLLECTION,
         .bFunctionProtocol = PC_PROTOCOL_UNDEFINED,
+        .iFunction = STR_INTERFACE_ASSOCIATION
     },
 };
 
@@ -203,12 +218,13 @@ static const USBDescOther vc_iface_descs[] = {
             CS_INTERFACE,            /*  u8  bDescriptorType */
             VC_HEADER,               /*  u8  bDescriptorSubtype */
             U16(0x0110),             /* u16  bcdADC */
-            U16(0x0034),             /* u16  wTotalLength */
+            U16(0x003b),             /* u16  wTotalLength */
             U32(0x005B8D80),         /* u32  dwClockFrequency */
             0x01,                    /*  u8  bInCollection */
             0x01,                    /*  u8  baInterfaceNr */
         }
-    }, {
+    },
+    {
         /* Input Terminal Descriptor (Camera) */
         .data = (uint8_t[]) {
             0x11,                    /*  u8  bLength */
@@ -224,7 +240,8 @@ static const USBDescOther vc_iface_descs[] = {
             0x02,                    /*  u8  bControlSize */
             U16(0x0000),             /* u16  bmControls */
         }
-    }, {
+    },
+    {
         /* Output Terminal Descriptor */
         .data = (uint8_t[]) {
             0x09,                    /*  u8  bLength */
@@ -233,8 +250,35 @@ static const USBDescOther vc_iface_descs[] = {
             OUTPUT_TERMINAL,         /*  u8  bTerminalID */
             U16(TT_STREAMING),       /* u16  wTerminalType */
             0x00,                    /*  u8  bAssocTerminal */
-            INPUT_TERMINAL,          /*  u8  bSourceID */
+            PROCESSING_UNIT,         /*  u8  bSourceID */
             STR_OUTPUT_TERMINAL,     /*  u8  iTerminal */
+        }
+    },
+    {
+        /* Selector Unit Descriptor */
+        .data = (uint8_t[]) {
+            0x07,                    /*  u8  bLength */
+            CS_INTERFACE,            /*  u8  bDescriptorType */
+            VC_SELECTOR_UNIT,        /*  u8  bDescriptorSubtype */
+            SELECTOR_UNIT,           /*  u8  bUnitID */
+            1,                       /*  u8  bNrInPins */
+            INPUT_TERMINAL,          /*  u8  baSourceID(1) */
+            STR_SELECTOR_UNIT,       /*  u8  iSelector */
+        }
+    },
+    {
+        /* Processing Unit Descriptor */
+        .data = (uint8_t[]) {
+            0x0d,                    /*  u8  bLength */
+            CS_INTERFACE,            /*  u8  bDescriptorType */
+            VC_PROCESSING_UNIT,      /*  u8  bDescriptorSubtype */
+            PROCESSING_UNIT,         /*  u8  bUnitID */
+            SELECTOR_UNIT,           /*  u8  bSourceID */
+            U16(0x0000),             /* u16  wMaxMultiplier */
+            0x03,                    /*  u8  bControlSize */
+            U24(0x000000),           /* u24  bmControls */
+            STR_PROCESSING_UNIT,     /*  u8  iProcessing */
+            0x00,                    /*  u8  bmVideoStandards */
         }
     }
 };
@@ -261,6 +305,93 @@ static const USBDescEndpoint vs_iface_eps[] = {
 #define VS_FORMAT_UNCOMPRESSED_LEN     0x1b
 #define VS_FRAME_MIN_LEN 0x1a
 #define VS_FRAME_SIZE(n)  (VS_FRAME_MIN_LEN+4*(n))
+
+static VideoControlType usb_video_pu_control_type_to_qemu(uint8_t cs)
+{
+    switch (cs) {
+    case PU_BRIGHTNESS_CONTROL:
+        return VideoControlTypeBrightness;
+    case PU_CONTRAST_CONTROL:
+        return VideoControlTypeContrast;
+    case PU_GAIN_CONTROL:
+        return VideoControlTypeGain;
+    case PU_GAMMA_CONTROL:
+        return VideoControlTypeGamma;
+    case PU_HUE_CONTROL:
+        return VideoControlTypeHue;
+    case PU_HUE_AUTO_CONTROL:
+        return VideoControlTypeHueAuto;
+    case PU_SATURATION_CONTROL:
+        return VideoControlTypeSaturation;
+    case PU_SHARPNESS_CONTROL:
+        return VideoControlTypeSharpness;
+    case PU_WHITE_BALANCE_TEMPERATURE_CONTROL:
+        return VideoControlTypeWhiteBalanceTemperature;
+    }
+
+    return VideoControlTypeMax;
+}
+
+static int usb_video_pu_control_bits(VideoControlType type)
+{
+    switch ((int) type) {
+    case VideoControlTypeBrightness:
+        return PU_CONTRL_BRIGHTNESS;
+    case VideoControlTypeContrast:
+        return PU_CONTRL_CONTRAST;
+    case VideoControlTypeGain:
+        return PU_CONTRL_GAIN;
+    case VideoControlTypeGamma:
+        return PU_CONTRL_GAMMA;
+    case VideoControlTypeHue:
+        return PU_CONTRL_HUE;
+    case VideoControlTypeHueAuto:
+        return PU_CONTRL_HUE_AUTO;
+    case VideoControlTypeSaturation:
+        return PU_CONTRL_SATURATION;
+    case VideoControlTypeSharpness:
+        return PU_CONTRL_SHARPNESS;
+    case VideoControlTypeWhiteBalanceTemperature:
+        return PU_CONTRL_WHITE_BALANCE_TEMPERATURE;
+    }
+
+    return 0;
+}
+
+static int usb_video_pu_control_type(VideoControlType type, uint8_t *size)
+{
+    switch ((int)type) {
+    case VideoControlTypeBrightness:
+        *size = 2;
+        return PU_BRIGHTNESS_CONTROL;
+    case VideoControlTypeContrast:
+        *size = 2;
+        return PU_CONTRAST_CONTROL;
+    case VideoControlTypeGain:
+        *size = 2;
+        return PU_GAIN_CONTROL;
+    case VideoControlTypeGamma:
+        *size = 2;
+        return PU_GAMMA_CONTROL;
+    case VideoControlTypeHue:
+        *size = 2;
+        return PU_HUE_CONTROL;
+    case VideoControlTypeHueAuto:
+        *size = 1;
+        return PU_HUE_AUTO_CONTROL;
+    case VideoControlTypeSaturation:
+        *size = 2;
+        return PU_SATURATION_CONTROL;
+    case VideoControlTypeSharpness:
+        *size = 2;
+        return PU_SHARPNESS_CONTROL;
+    case VideoControlTypeWhiteBalanceTemperature:
+        *size = 2;
+        return PU_WHITE_BALANCE_TEMPERATURE_CONTROL;
+    }
+
+    return PU_CONTROL_UNDEFINED;
+}
 
 static void usb_video_add_vs_header(USBDescOther *header, uint16_t wTotalLength)
 {
@@ -427,19 +558,63 @@ static void usb_video_add_vs_desc(USBVideoState *s, USBDescIface *iface)
     iface->descs = g_new0(USBDescOther, iface->ndesc);
 
     // parse all formats
-    for (i = 0; i < s->video->nmode; i++) {
+    for (i = 0; i < s->video->nmodes; i++) {
         usb_video_add_vs_format(iface, &s->video->modes[i], i + 1, &len);
     }
 
     usb_video_add_vs_header(&iface->descs[0], len);
 }
 
-enum video_desc_iface_idx {
-    VC = 0,
-    VS0,
-    VS1,
-    USB_VIDEO_IFACE_COUNT
-};
+static void usb_video_add_vc_desc(USBVideoState *s, USBDescIface *iface)
+{
+    uint8_t *bmControls = NULL;
+    uint32_t bitmap = 0;
+
+    for (int i = 0; i < s->video->ncontrols; i++) {
+
+        VideoControl *control;
+        int pu_control;
+        uint8_t size = 0;
+
+        control = &s->video->controls[i];
+        bitmap |= usb_video_pu_control_bits(control->type);
+        pu_control = usb_video_pu_control_type(control->type, &size);
+
+        if (pu_control == PU_CONTROL_UNDEFINED)
+            continue;
+
+        s->pu_attrs[control->type] = (USBVideoControlInfo) {
+
+            .selector = pu_control,
+            .caps     = CONTROL_CAP_GET | CONTROL_CAP_SET | CONTROL_CAP_ASYNCHRONOUS,
+            .size     = size,
+
+            .value[ATTRIBUTE_DEF] = cpu_to_le32(control->def),
+            .value[ATTRIBUTE_MIN] = cpu_to_le32(control->min),
+            .value[ATTRIBUTE_MAX] = cpu_to_le32(control->max),
+            .value[ATTRIBUTE_CUR] = cpu_to_le32(control->def),
+            .value[ATTRIBUTE_RES] = cpu_to_le32(control->step)
+        };
+    }
+
+    for (uint8_t i = 0; i < iface->ndesc; i++) {
+
+        if (iface->descs[i].data[2] == VC_PROCESSING_UNIT) {
+            bmControls = (uint8_t*) &iface->descs[i].data[8];
+        }
+    }
+
+    /*
+     * PU descriptor not found. Should not happen...
+     * */
+    assert(bmControls != NULL);
+
+    bitmap = cpu_to_le32(bitmap);
+
+    *(bmControls + 0) = (bitmap >>  0) & 0xff;
+    *(bmControls + 1) = (bitmap >>  8) & 0xff;
+    *(bmControls + 2) = (bitmap >> 16) & 0xff;
+}
 
 static const USBDescIface *usb_video_desc_iface_new(USBDevice *dev)
 {
@@ -476,6 +651,7 @@ static const USBDescIface *usb_video_desc_iface_new(USBDevice *dev)
     d[VS1].eps                = (USBDescEndpoint *)vs_iface_eps;
 
     usb_video_add_vs_desc(s, &d[VS0]);
+    usb_video_add_vc_desc(s, &d[VC]);
 
     return d;
 }
@@ -515,6 +691,7 @@ static void usb_video_desc_new(USBDevice *dev)
     d = g_new0(USBDesc, 1);
     d->id.idVendor      = USBVIDEO_VENDOR_NUM;
     d->id.idProduct     = USBVIDEO_PRODUCT_NUM;
+    d->id.bcdDevice     = 0;
     d->id.iManufacturer = STR_MANUFACTURER;
     d->id.iProduct      = STR_PRODUCT;
     d->id.iSerialNumber = STR_SERIALNUMBER;
@@ -538,32 +715,6 @@ static void usb_video_desc_free(USBDevice *dev)
     g_free((void *)d->super);
 
     dev->usb_desc = NULL;
-}
-
-static VideoControlType usb_video_pu_control_type_to_qemu(uint8_t cs)
-{
-    switch (cs) {
-    case PU_BRIGHTNESS_CONTROL:
-        return VideoControlTypeBrightness;
-    case PU_CONTRAST_CONTROL:
-        return VideoControlTypeContrast;
-    case PU_GAIN_CONTROL:
-        return VideoControlTypeGain;
-    case PU_GAMMA_CONTROL:
-        return VideoControlTypeGamma;
-    case PU_HUE_CONTROL:
-        return VideoControlTypeHue;
-    case PU_HUE_AUTO_CONTROL:
-        return VideoControlTypeHueAuto;
-    case PU_SATURATION_CONTROL:
-        return VideoControlTypeSaturation;
-    case PU_SHARPNESS_CONTROL:
-        return VideoControlTypeSharpness;
-    case PU_WHITE_BALANCE_TEMPERATURE_CONTROL:
-        return VideoControlTypeWhiteBalanceTemperature;
-    }
-
-    return VideoControlTypeMax;
 }
 
 static void usb_video_handle_data_control_in(USBDevice *dev, USBPacket *p)
@@ -662,6 +813,7 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
 
     usb_packet_copy(p, &header, header.bHeaderLength);
     usb_packet_copy(p, frame_chunk.data, frame_chunk.size);
+    qemu_videodev_read_frame_done(s->video, NULL);
 
     p->status = USB_RET_SUCCESS;
 
@@ -672,7 +824,7 @@ static uint32_t usb_video_get_max_framesize(Videodev *video)
 {
     uint32_t max_framesize = 0;
 
-    for (int i = 0; i < video->nmode; i++) {
+    for (int i = 0; i < video->nmodes; i++) {
 
         VideoMode *mode = &video->modes[i];
 

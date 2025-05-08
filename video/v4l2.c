@@ -71,6 +71,18 @@ static uint32_t video_qemu_control_to_v4l2(VideoControlType type)
     return 0;
 }
 
+static VideoControlType video_v4l2_control_to_qemu(const uint32_t id)
+{
+    for (int i = 0; i < ARRAY_SIZE(video_v4l2_ctrl_table); i++) {
+
+        if (video_v4l2_ctrl_table[i].v == id) {
+            return video_v4l2_ctrl_table[i].q;
+        }
+    }
+
+    return VideoControlTypeMax;
+}
+
 static int video_v4l2_parse(Videodev *vd, QemuOpts *opts, Error **errp)
 {
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
@@ -172,10 +184,10 @@ static int video_v4l2_enum_modes(Videodev *vd, Error **errp)
             continue;
         }
 
-        vd->nmode++;
-        vd->modes = g_realloc(vd->modes, vd->nmode * sizeof(VideoMode));
+        vd->nmodes++;
+        vd->modes = g_realloc(vd->modes, vd->nmodes * sizeof(VideoMode));
 
-        mode = &vd->modes[vd->nmode - 1];
+        mode = &vd->modes[vd->nmodes - 1];
         mode->pixelformat = v4l2_fmt.pixelformat;
         mode->framesizes = NULL;
         mode->nframesize = 0;
@@ -229,6 +241,54 @@ static int video_v4l2_enum_modes(Videodev *vd, Error **errp)
 
         vd_error_setg(vd, errp, "VIDIOC_ENUM_FMT: %s", strerror(errno));
         return VIDEODEV_RC_ERROR;
+    }
+
+    return VIDEODEV_RC_OK;
+}
+
+static int video_v4l2_enum_controls(Videodev *vd, Error **errp)
+{
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    struct v4l2_queryctrl v4l2_ctrl = { 0 };
+    VideoControlType type;
+
+    while (1) {
+
+        v4l2_ctrl.id |= V4L2_CTRL_FLAG_NEXT_CTRL;
+
+        if (ioctl(vv->fd, VIDIOC_QUERYCTRL, &v4l2_ctrl) < 0) {
+
+            if (errno == EINVAL) {
+                break;
+            }
+
+            vd_error_setg(vd, errp, "VIDIOC_QUERYCTRL: %s", strerror(errno));
+
+            if (vd->controls != NULL)
+                g_free(vd->controls);
+
+            return VIDEODEV_RC_ERROR;
+        }
+
+        if (v4l2_ctrl.flags & V4L2_CTRL_FLAG_INACTIVE) {
+            continue;
+        }
+
+        if ((type = video_v4l2_control_to_qemu(v4l2_ctrl.id)) == VideoControlTypeMax) {
+            continue;
+        }
+
+        vd->ncontrols += 1;
+        vd->controls   = g_realloc(vd->controls, vd->ncontrols * sizeof(VideoControl));
+
+        vd->controls[vd->ncontrols - 1] = (VideoControl) {
+
+            .type = type,
+            .def  = v4l2_ctrl.default_value,
+            .min  = v4l2_ctrl.minimum,
+            .max  = v4l2_ctrl.maximum,
+            .step = v4l2_ctrl.step
+        };
     }
 
     return VIDEODEV_RC_OK;
@@ -536,6 +596,7 @@ static void video_v4l2_class_init(ObjectClass *oc, void *data)
     vc->open          = video_v4l2_open;
     vc->close         = video_v4l2_close;
     vc->enum_modes    = video_v4l2_enum_modes;
+    vc->enum_controls = video_v4l2_enum_controls;
     vc->set_control   = video_v4l2_set_control;
     vc->stream_on     = video_v4l2_stream_on;
     vc->stream_off    = video_v4l2_stream_off;
