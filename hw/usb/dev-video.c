@@ -855,12 +855,6 @@ static int usb_video_initialize(USBDevice *dev)
     usb_desc_init(dev);
 
     /*
-     * initialize processing unit attributes
-     * */
-
-    // todo
-
-    /*
      * initialize video streaming control attributes
      * */
 
@@ -1237,8 +1231,9 @@ static void usb_video_set_interface(USBDevice *dev, int iface,
     USBBus *bus = usb_bus_from_device(dev);
     trace_usb_video_set_interface(bus->busnr, dev->addr, iface, value);
 
-    if (iface == IF_STREAMING)
+    if (iface == IF_STREAMING) {
         usb_video_set_streaming_altset(dev, value);
+    }
 }
 
 static void usb_video_unrealize(USBDevice *dev)

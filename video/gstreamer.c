@@ -9,12 +9,21 @@
 
 #define TYPE_VIDEODEV_GSTREAMER TYPE_VIDEODEV"-gstreamer"
 
+/*
+ * GStreamer pipeline:
+ *
+ * <------------------- qemu-cmdline -------------------><--- qemu-runtime --->
+ * [source] -> [converter #1] -> ... -> [converter #n] -> capsfilter -> appsink
+ */
 struct GStreamerVideodev {
+
     Videodev parent;
 
-    GstElement *pipeline;
-    GstElement *src;
-    GstElement *sink;
+    GstElement *pipeline; // gstreamer pipeline
+    GstElement *head;     // first element of cmdline pipeline (source)
+    GstElement *tail;     // last element of cmdline pipeline
+    GstElement *filter;   // dynamically generated capsfilter
+    GstElement *sink;     // dynamnically generated appsink
 
     struct GStreamerVideoFrame {
         GstSample *sample;
@@ -25,6 +34,15 @@ struct GStreamerVideodev {
 typedef struct GStreamerVideodev GStreamerVideodev;
 
 DECLARE_INSTANCE_CHECKER(GStreamerVideodev, GSTREAMER_VIDEODEV, TYPE_VIDEODEV_GSTREAMER)
+
+typedef struct {
+    const char *format;
+    uint32_t fourcc;
+} FormatFourCC;
+
+FormatFourCC formatFourCCMap[] = {
+    {"YUY2", QEMU_VIDEO_PIX_FMT_YUYV},
+};
 
 typedef struct VideoGStreamerCtrl {
     VideoControlType q;
@@ -62,11 +80,53 @@ static const char *video_qemu_control_to_gstreamer(VideoControlType type)
     return NULL;
 }
 
+static GstElement *video_gstreamer_pipeline_head(GstElement *tail)
+{
+    GstElement *current = tail;
+
+    while (true) {
+
+        GstPad *sink_pad, *peer_pad;
+        GstElement *prev;
+
+        sink_pad = gst_element_get_static_pad(current, "sink");
+        if (!sink_pad) {
+            /* no sink pad - source/head found */
+            break;
+        }
+
+        if (!gst_pad_is_linked(sink_pad)) {
+            /* unlinked sink pad - not a proper source */
+            gst_object_unref(sink_pad);
+            return NULL;
+        }
+
+        peer_pad = gst_pad_get_peer(sink_pad);
+        gst_object_unref(sink_pad);
+        if (!peer_pad) {
+            /* broken pipeline? */
+            return NULL;
+        }
+
+        prev = gst_pad_get_parent_element(peer_pad);
+        gst_object_unref(peer_pad);
+        if (!prev) {
+            /* broken pipeline? */
+            return NULL;
+        }
+
+        current = prev;
+    }
+
+    return current;
+}
+
 static int video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
     const char *pipeline_desc = qemu_opt_get(opts, "pipeline");
-    GstPad *src_pad;
+    GstPad *tail_src_pad;
+    GError *error = NULL;
 
     if (pipeline_desc == NULL) {
         vd_error_setg(vd, errp, QERR_MISSING_PARAMETER, "pipeline");
@@ -76,27 +136,45 @@ static int video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
     if (!gst_is_initialized())
         gst_init(NULL, NULL);
 
-    GError *error = NULL;
     gv->pipeline = gst_parse_bin_from_description(pipeline_desc, false, &error);
     if (error) {
         vd_error_setg(vd, errp, "unable to parse pipeline: %s", error->message);
         return VIDEODEV_RC_ERROR;
     }
 
-    src_pad = gst_bin_find_unlinked_pad(GST_BIN(gv->pipeline), GST_PAD_SRC);
-    if (!src_pad) {
+    tail_src_pad = gst_bin_find_unlinked_pad(GST_BIN(gv->pipeline), GST_PAD_SRC);
+    if (!tail_src_pad) {
         vd_error_setg(vd, errp, "pipeline has no unlinked src pad");
         return VIDEODEV_RC_ERROR;
     }
 
-    gv->src = gst_pad_get_parent_element(src_pad);
-    gst_object_unref(src_pad);
-    if (!gv->src) {
-        vd_error_setg(vd, errp, "failed to get pipeline src element");
+    gv->tail = gst_pad_get_parent_element(tail_src_pad);
+    gst_object_unref(tail_src_pad);
+    if (!gv->tail) {
+        vd_error_setg(vd, errp, "failed to get pipeline's tail element");
         return VIDEODEV_RC_ERROR;
     }
 
-    gv->sink = gst_element_factory_make ("appsink", "sink");
+    gv->head = video_gstreamer_pipeline_head(gv->tail);
+    if (!gv->head) {
+        vd_error_setg(vd, errp, "failed to get pipeline's head element");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    gv->filter = gst_element_factory_make("capsfilter", "filter");
+    if (!gv->filter) {
+        vd_error_setg(vd, errp, "failed to create capsfilter");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    gst_bin_add(GST_BIN(gv->pipeline), gv->filter);
+
+    if (!gst_element_link(gv->tail, gv->filter)) {
+        vd_error_setg(vd, errp, "failed to link pipeline to capsfilter");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    gv->sink = gst_element_factory_make("appsink", "sink");
     if (!gv->sink) {
         vd_error_setg(vd, errp, "failed to create appsink");
         return VIDEODEV_RC_ERROR;
@@ -104,7 +182,7 @@ static int video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
 
     gst_bin_add(GST_BIN(gv->pipeline), gv->sink);
 
-    if (!gst_element_link(gv->src, gv->sink)) {
+    if (!gst_element_link(gv->filter, gv->sink)) {
         vd_error_setg(vd, errp, "failed to link pipeline to appsink");
         return VIDEODEV_RC_ERROR;
     }
@@ -113,34 +191,39 @@ static int video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
     return VIDEODEV_RC_OK;
 }
 
-typedef struct {
-    const char *format;
-    uint32_t fourcc;
-} FormatFourCC;
-
-FormatFourCC formatFourCCMap[] = {
-    {"YUY2", QEMU_VIDEO_PIX_FMT_YUYV},
-};
-
-static uint32_t gst_format_to_fourcc(const char *format) {
-    int i;
-
-    if (!format)
+static uint32_t gst_format_to_fourcc(const char *format)
+{
+    if (!format) {
         return 0;
+    }
 
-    for (i = 0; i < ARRAY_SIZE(formatFourCCMap); i++) {
-        if (!strcmp(formatFourCCMap[i].format, format))
+    for (int i = 0; i < ARRAY_SIZE(formatFourCCMap); i++) {
+
+        if (!strcmp(formatFourCCMap[i].format, format)) {
             return formatFourCCMap[i].fourcc;
+        }
     }
 
     return 0;
 }
 
+static const char *gst_fourcc_to_format(const uint32_t fourcc) {
+
+    for (int i = 0; i < ARRAY_SIZE(formatFourCCMap); i++) {
+
+        if (formatFourCCMap[i].fourcc == fourcc) {
+            return formatFourCCMap[i].format;
+        }
+    }
+
+    return NULL;
+}
+
 static int video_gstreamer_enum_modes(Videodev *vd, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
-    GstPad *src_pad;
-    GstCaps *src_caps;
+    GstPad *tail_src_pad;
+    GstCaps *tail_src_caps;
     const GstStructure *s;
     uint32_t pixelformat;
     VideoMode *mode;
@@ -151,20 +234,20 @@ static int video_gstreamer_enum_modes(Videodev *vd, Error **errp)
     const gchar *name, *format;
     const GValue *width, *height, *framerates;
 
-    src_pad = gst_element_get_static_pad(gv->src, "src");
-    if (!src_pad) {
+    tail_src_pad = gst_element_get_static_pad(gv->tail, "src");
+    if (!tail_src_pad) {
         vd_error_setg(vd, errp, "failed to get src pad");
         return VIDEODEV_RC_ERROR;
     }
 
-    src_caps = gst_pad_query_caps(src_pad, NULL);
-    if (!src_caps) {
+    tail_src_caps = gst_pad_query_caps(tail_src_pad, NULL);
+    if (!tail_src_caps) {
         vd_error_setg(vd, errp, "failed to get capabilities from src pad");
         return VIDEODEV_RC_ERROR;
     }
 
-    for (i = 0; i < gst_caps_get_size(src_caps); i++) {
-        s = gst_caps_get_structure(src_caps, i);
+    for (i = 0; i < gst_caps_get_size(tail_src_caps); i++) {
+        s = gst_caps_get_structure(tail_src_caps, i);
 
         name = gst_structure_get_name(s);
         if (strcmp(name, "video/x-raw"))
@@ -255,6 +338,39 @@ static int video_gstreamer_enum_modes(Videodev *vd, Error **errp)
     return VIDEODEV_RC_OK;
 }
 
+static int video_gstreamer_set_options(Videodev *vd, Error **errp)
+{
+    GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
+    const char *pixformat;
+    GstCaps *caps;
+
+    if ((pixformat = gst_fourcc_to_format(vd->selected.mode->pixelformat)) == NULL) {
+
+        vd_error_setg(vd, errp, "unsupported pixelformat");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    caps = gst_caps_new_simple(
+        "video/x-raw",
+        "width",     G_TYPE_INT,        vd->selected.frmsz->width,
+        "height",    G_TYPE_INT,        vd->selected.frmsz->height,
+        "format",    G_TYPE_STRING,     pixformat,
+        "framerate", GST_TYPE_FRACTION, vd->selected.frmrt.denominator,
+                                        vd->selected.frmrt.numerator, NULL
+    );
+
+    if (caps == NULL) {
+
+        vd_error_setg(vd, errp, "failed to create new caps");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    g_object_set(gv->filter, "caps", caps, NULL);
+    gst_caps_unref(caps);
+
+    return VIDEODEV_RC_OK;
+}
+
 static int video_gstreamer_stream_on(Videodev *vd, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
@@ -263,6 +379,10 @@ static int video_gstreamer_stream_on(Videodev *vd, Error **errp)
     if (gv->pipeline == NULL) {
 
         vd_error_setg(vd, errp, "GStreamer pipeline not initialized!");
+        return VIDEODEV_RC_ERROR;
+    }
+
+    if (video_gstreamer_set_options(vd, errp) != VIDEODEV_RC_OK) {
         return VIDEODEV_RC_ERROR;
     }
 
@@ -360,8 +480,8 @@ static int video_gstreamer_set_control(Videodev *vd, VideoControl *ctrl, Error *
         return VIDEODEV_RC_INVAL;
     }
 
-    g_object_set(G_OBJECT(gv->src), property, ctrl->cur, NULL);
-    g_object_get(G_OBJECT(gv->src), property, &value, NULL);
+    g_object_set(G_OBJECT(gv->head), property, ctrl->cur, NULL);
+    g_object_get(G_OBJECT(gv->head), property, &value, NULL);
 
     if (value != ctrl->cur) {
 
