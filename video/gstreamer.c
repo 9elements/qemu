@@ -468,6 +468,66 @@ static int video_gstreamer_release_frame(Videodev *vd, Error **errp)
     return VIDEODEV_RC_OK;
 }
 
+static int video_gstreamer_probe_control(Videodev *vd, VideoGStreamerCtrl *ctrl, VideoControl *c)
+{
+    GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
+    GParamSpec *pspec;
+    GParamSpecInt *ispec;
+
+    /*
+     * Apparently there is no proper way to find out
+     * the real minimum and maximum of a video control.
+     *
+     * There is GParamSpec, but that one only gives us
+     * min and max of the underlying datatype.
+     *
+     * As a workaround, we could dynamically prope accepted
+     * values for a given control using g_object_get/g_object_set,
+     * but that might be an idea for the future.
+     */
+
+    pspec = g_object_class_find_property(G_OBJECT_GET_CLASS(gv->head), ctrl->v);
+
+    if (pspec == NULL) {
+        return VIDEODEV_RC_NOTSUP;
+    }
+
+    ispec = G_PARAM_SPEC_INT(pspec);
+
+    *c = (VideoControl) {
+
+        .type = ctrl->q,
+        .min  = ispec->minimum,
+        .max  = ispec->maximum,
+        .step = 1
+    };
+
+    g_object_get(G_OBJECT(gv->head), ctrl->v, &c->def, NULL);
+    return VIDEODEV_RC_OK;
+}
+
+static int video_gstreamer_enum_controls(Videodev *vd, Error **errp)
+{
+    for (int i = 0; i < ARRAY_SIZE(video_gstreamer_ctrl_table); i++) {
+
+        VideoGStreamerCtrl *ctrl;
+        VideoControl ctrl_buffer;
+
+        ctrl = &video_gstreamer_ctrl_table[i];
+
+        if (video_gstreamer_probe_control(vd, ctrl, &ctrl_buffer) != VIDEODEV_RC_OK) {
+            continue;
+        }
+
+        vd->ncontrols += 1;
+        vd->controls   = g_realloc(vd->controls, vd->ncontrols * sizeof(VideoControl));
+
+        vd->controls[vd->ncontrols - 1] = ctrl_buffer;
+    }
+
+    return VIDEODEV_RC_OK;
+}
+
 static int video_gstreamer_set_control(Videodev *vd, VideoControl *ctrl, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
@@ -502,6 +562,7 @@ static void video_gstreamer_class_init(ObjectClass *oc, void *data)
     vc->stream_off    = video_gstreamer_stream_off;
     vc->claim_frame   = video_gstreamer_claim_frame;
     vc->release_frame = video_gstreamer_release_frame;
+    vc->enum_controls = video_gstreamer_enum_controls;
     vc->set_control   = video_gstreamer_set_control;
 }
 
