@@ -3,37 +3,7 @@
 #include "qapi/qmp/qerror.h"
 #include "qemu/option.h"
 #include "video/video.h"
-
-#include <gst/gst.h>
-#include <gst/app/gstappsink.h>
-
-#define TYPE_VIDEODEV_GSTREAMER TYPE_VIDEODEV"-gstreamer"
-
-/*
- * GStreamer pipeline:
- *
- * <------------------- qemu-cmdline -------------------><--- qemu-runtime --->
- * [source] -> [converter #1] -> ... -> [converter #n] -> capsfilter -> appsink
- */
-struct GStreamerVideodev {
-
-    Videodev parent;
-
-    GstElement *pipeline; // gstreamer pipeline
-    GstElement *head;     // first element of cmdline pipeline (source)
-    GstElement *tail;     // last element of cmdline pipeline
-    GstElement *filter;   // dynamically generated capsfilter
-    GstElement *sink;     // dynamnically generated appsink
-
-    struct GStreamerVideoFrame {
-        GstSample *sample;
-        GstBuffer *buffer;
-        GstMapInfo map_info;
-    } current_frame;
-};
-typedef struct GStreamerVideodev GStreamerVideodev;
-
-DECLARE_INSTANCE_CHECKER(GStreamerVideodev, GSTREAMER_VIDEODEV, TYPE_VIDEODEV_GSTREAMER)
+#include "video/gstreamer-common.h"
 
 typedef struct {
     const char *format;
@@ -552,7 +522,7 @@ static int video_gstreamer_set_control(Videodev *vd, VideoControl *ctrl, Error *
     return VIDEODEV_RC_OK;
 }
 
-static void video_gstreamer_class_init(ObjectClass *oc, void *data)
+void video_gstreamer_class_init(ObjectClass *oc, void *data)
 {
     VideodevClass *vc = VIDEODEV_CLASS(oc);
 
@@ -566,7 +536,7 @@ static void video_gstreamer_class_init(ObjectClass *oc, void *data)
     vc->set_control   = video_gstreamer_set_control;
 }
 
-static const TypeInfo video_v4l2_type_info = {
+static const TypeInfo video_gstreamer_type_info = {
     .name = TYPE_VIDEODEV_GSTREAMER,
     .parent = TYPE_VIDEODEV,
     .instance_size = sizeof(GStreamerVideodev),
@@ -575,7 +545,7 @@ static const TypeInfo video_v4l2_type_info = {
 
 static void register_types(void)
 {
-    type_register_static(&video_v4l2_type_info);
+    type_register_static(&video_gstreamer_type_info);
 }
 
 type_init(register_types);
