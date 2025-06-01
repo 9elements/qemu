@@ -43,7 +43,7 @@ static int video_libcamera_parse(Videodev *vd, QemuOpts *opts, Error **errp)
     LibcameraVideodev *lv = LIBCAMERA_VIDEODEV(vd);
     GStreamerVideodev *gv = &lv->parent;
     const char *cam_name = qemu_opt_get(opts, "camera-name");
-    const char *caps = qemu_opt_get(opts, "caps");
+    char *caps = video_gstreamer_qemu_opt_get(opts, "caps");
     char *pipeline_desc = NULL;
     GError *error = NULL;
 
@@ -58,6 +58,7 @@ static int video_libcamera_parse(Videodev *vd, QemuOpts *opts, Error **errp)
     }
 
     pipeline_desc = video_libcamera_pipeline_string(cam_name, caps);
+    g_free(caps);
     if (!pipeline_desc) {
         vd_error_setg(vd, errp, "memory allocation failure");
         return VIDEODEV_RC_ERROR;

@@ -33,5 +33,6 @@ typedef struct GStreamerVideodev GStreamerVideodev;
 DECLARE_INSTANCE_CHECKER(GStreamerVideodev, GSTREAMER_VIDEODEV, TYPE_VIDEODEV_GSTREAMER)
 
 void video_gstreamer_class_init(ObjectClass *oc, void *data);
+char *video_gstreamer_qemu_opt_get(QemuOpts *opts, const char *name);
 
 #endif /* QEMU_VIDEO_GSTREAMER_COMMON_H */

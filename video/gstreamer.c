@@ -91,14 +91,37 @@ static GstElement *video_gstreamer_pipeline_head(GstElement *tail)
     return current;
 }
 
+char *video_gstreamer_qemu_opt_get(QemuOpts *opts, const char *name)
+{
+    const char *qemu_opt = qemu_opt_get(opts, name);
+
+    /*
+     * QEMU's option parser forbids ',' inside option values,
+     * making it hard to pass full GStreamer pipelines over the cmdline.
+     *
+     * Users replace ',' with '^' as a workaround. This function reverses
+     * that replacement to restore the original pipeline.
+     *
+     * Use it whenever you would expect ',' within your option value.
+     */
+
+    if (qemu_opt == NULL) {
+        return NULL;
+    }
+
+    char *sanitized_opt = g_strdup(qemu_opt);
+    g_strdelimit(sanitized_opt, "^", ',');
+    return sanitized_opt;
+}
+
 static int video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
-    const char *pipeline_desc = qemu_opt_get(opts, "pipeline");
+    char *pipeline = video_gstreamer_qemu_opt_get(opts, "pipeline");
     GstPad *tail_src_pad;
     GError *error = NULL;
 
-    if (pipeline_desc == NULL) {
+    if (pipeline == NULL) {
         vd_error_setg(vd, errp, QERR_MISSING_PARAMETER, "pipeline");
         return VIDEODEV_RC_ERROR;
     }
@@ -106,7 +129,8 @@ static int video_gstreamer_parse(Videodev *vd, QemuOpts *opts, Error **errp)
     if (!gst_is_initialized())
         gst_init(NULL, NULL);
 
-    gv->pipeline = gst_parse_bin_from_description(pipeline_desc, false, &error);
+    gv->pipeline = gst_parse_bin_from_description(pipeline, false, &error);
+    g_free(pipeline);
     if (error) {
         vd_error_setg(vd, errp, "unable to parse pipeline: %s", error->message);
         return VIDEODEV_RC_ERROR;
