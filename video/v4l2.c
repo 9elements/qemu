@@ -1,3 +1,16 @@
+/*
+ * Copyright 2025 9elements GmbH
+ * Copyright 2021 Bytedance, Inc.
+ *
+ * Authors:
+ *   David Milosevic <david.milosevic@9elements.com>
+ *   Marcello Sylvester Bauer <marcello.bauer@9elements.com>
+ *   zhenwei pi <pizhenwei@bytedance.com>
+ *
+ * This work is licensed under the terms of the GNU GPL, version 2 or later.
+ * See the COPYING file in the top-level directory.
+ */
+
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "qapi/qmp/qerror.h"

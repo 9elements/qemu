@@ -1,3 +1,13 @@
+/*
+ * Copyright 2025 9elements GmbH
+ *
+ * Authors:
+ *   David Milosevic <david.milosevic@9elements.com>
+ *
+ * This work is licensed under the terms of the GNU GPL, version 2 or later.
+ * See the COPYING file in the top-level directory.
+ */
+
 #ifndef QEMU_VIDEO_GSTREAMER_COMMON_H
 #define QEMU_VIDEO_GSTREAMER_COMMON_H
 

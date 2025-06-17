@@ -1,7 +1,7 @@
 /*
  * UVC Device emulation, base on UVC specification 1.5
  *
- * Copyright 2024 9elements GmbH
+ * Copyright 2025 9elements GmbH
  * Copyright 2021 Bytedance, Inc.
  *
  * Authors:
