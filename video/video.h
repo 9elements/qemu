@@ -84,6 +84,13 @@ typedef struct VideoStreamOptions {
     uint32_t frame_interval;
 } VideoStreamOptions;
 
+typedef struct VideoFrame {
+    uint8_t *data;
+    size_t bytes_left;
+    QSIMPLEQ_ENTRY(VideoFrame) next;
+    uint8_t meta[]; // flexible array
+} VideoFrame;
+
 typedef struct VideoFrameChunk {
     void *data;
     size_t size;
@@ -111,11 +118,13 @@ struct Videodev {
         VideoFramerate frmrt;
     } selected;
 
-    struct VideoFrame {
-        uint8_t *data;
-        size_t bytes_left;
-    } current_frame;
+    struct VideoFrameQueue {
+        QemuMutex lock;
+        int total;
+        QSIMPLEQ_HEAD(, VideoFrame) queue;
+    } frames;
 
+    struct VideoFrame *current_frame;
     QLIST_ENTRY(Videodev) list;
 };
 
@@ -230,23 +239,28 @@ struct VideodevClass {
     int (*stream_off)(Videodev *vd, Error **errp);
 
     /*
-     * Claim a single frame from the backend.
+     * Install the producer thread
      *
-     * An implementation of claim_frame must acquire the latest
-     * frame from the backend.
+     * This function installs the producer thread, which
+     * asynchronously claims a frame from the backend and enqueues
+     * it into Videodev.frames.queue. Access to the queue must be
+     * synchronized using Videodev.frames.lock
      *
-     * If no frame is ready to be claimed, VIDEODEV_RC_UNDERRUN shall be returned
+     * Important: only the producer thread is allowed to write
+     * to Videodev.frames.queue
      *
-     * on success:
-     *   set Videodev.current_frame.data to acquired frame
-     *   set Videodev.current_frame.bytes_left to total size of acquired frame (> 0)
-     *   returns VIDEODEV_RC_OK
-     * on failure:
-     *   must not modify Videodev.current_frame
-     *   returns no VIDEODEV_RC_OK
-     *   sets @errp accordingly
+     * Called right before @stream_on
      * */
-    int (*claim_frame)(Videodev *vd, Error **errp);
+    void (*install_producer)(Videodev *vd);
+
+    /*
+     * Uninstall the producer thread
+     *
+     * This function uninstalls the producer thread.
+     *
+     * Called right before @stream_off
+     * */
+    void (*uninstall_producer)(Videodev *vd);
 
     /*
      * Release a previously acquired frame.
@@ -255,8 +269,7 @@ struct VideodevClass {
      * acquired frame.
      *
      * on success:
-     *   set Videodev.current_frame.data to NULL
-     *   set Videodev.current_frame.bytes_left to 0
+     *   set Videodev.current_frame to NULL
      *   returns VIDEODEV_RC_OK
      * on failure:
      *   must not modify Videodev.current_frame

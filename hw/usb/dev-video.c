@@ -756,7 +756,8 @@ static void usb_video_send_empty_packet(USBDevice *dev, USBPacket *p)
     usb_packet_copy(p, &header, header.bHeaderLength);
     s->streaming_error = VS_ERROR_INPUT_BUFFER_UNDERRUN;
 }
-
+#include "qemu/atomic.h"
+#include <sys/syscall.h>
 static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
 {
     USBVideoState *s = USB_VIDEO(dev);
@@ -787,6 +788,10 @@ static void usb_video_handle_data_streaming_in(USBDevice *dev, USBPacket *p)
         p->status = USB_RET_STALL;
         return;
     }
+
+    pid_t tid = syscall(SYS_gettid);
+    int total = qatomic_read(&s->video->frames.total);
+    qemu_log("queue.total = %d (tid=%d)\n", total, tid);
 
     rc = qemu_videodev_read_frame(s->video, payload_length, &frame_chunk, &err);
 

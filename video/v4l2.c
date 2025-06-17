@@ -2,6 +2,7 @@
 #include "qapi/error.h"
 #include "qapi/qmp/qerror.h"
 #include "qemu/option.h"
+#include "qemu/main-loop.h"
 #include "video/video.h"
 
 #include <linux/videodev2.h>
@@ -17,6 +18,10 @@ typedef struct V4l2Buffer {
     uint32_t length;
 } V4l2Buffer;
 
+typedef struct V4l2VideoFrameMetaData {
+    int index;
+} V4l2VideoFrameMetaData;
+
 struct V4l2Videodev {
     Videodev parent;
     int fd;
@@ -24,10 +29,6 @@ struct V4l2Videodev {
 
     uint8_t nbuffers;
     V4l2Buffer buffers[V4L2_BUFFER_MAX];
-
-    struct V4l2VideoFrame {
-        int index;
-    } current_frame;
 };
 typedef struct V4l2Videodev V4l2Videodev;
 
@@ -138,8 +139,6 @@ static int video_v4l2_open(Videodev *vd, Error **errp)
     }
 
     vv->nbuffers = V4L2_BUFFER_DFL;
-    vv->current_frame.index = -1;
-
     return VIDEODEV_RC_OK;
 
 close_and_error:
@@ -548,60 +547,83 @@ static int video_v4l2_stream_off(Videodev *vd, Error **errp)
     video_v4l2_free_buffers(vd);
     return VIDEODEV_RC_OK;
 }
-
-static int video_v4l2_claim_frame(Videodev *vd, Error **errp)
+#include "qemu/log.h"
+#include "qemu/atomic.h"
+#include <sys/syscall.h>
+static void video_v4l2_claim_frame(void *opaque)
 {
+    Videodev *vd = (Videodev*) opaque;
     V4l2Videodev *vv = V4L2_VIDEODEV(vd);
 
-    if (video_v4l2_dqbuf(vd, &vv->current_frame.index) < 0) {
+    int index;
+    VideoFrame *new_frame;
+    V4l2VideoFrameMetaData *meta;
 
-        if (errno == EAGAIN) {
-
-            vd_error_setg(vd, errp, "VIDIOC_DQBUF: underrun");
-            return VIDEODEV_RC_UNDERRUN;
-        }
-
-        vd_error_setg(vd, errp, "VIDIOC_DQBUF: %s", strerror(errno));
-        return VIDEODEV_RC_ERROR;
+    if (video_v4l2_dqbuf(vd, &index) < 0) {
+        return;
     }
 
-    vd->current_frame.data       = vv->buffers[vv->current_frame.index].addr;
-    vd->current_frame.bytes_left = vv->buffers[vv->current_frame.index].length;
+    new_frame = g_malloc(sizeof(VideoFrame) + sizeof(*meta));
+    new_frame->data       = vv->buffers[index].addr;
+    new_frame->bytes_left = vv->buffers[index].length;
 
-    return VIDEODEV_RC_OK;
+    meta = (V4l2VideoFrameMetaData*) new_frame->meta;
+    meta->index = index;
+
+    qemu_mutex_lock(&vd->frames.lock);
+    QSIMPLEQ_INSERT_TAIL(&vd->frames.queue, new_frame, next);
+    qatomic_inc(&vd->frames.total);
+    qemu_mutex_unlock(&vd->frames.lock);
+
+    pid_t tid = syscall(SYS_gettid);
+    qemu_log("frame enqueued (tid=%d)\n", tid);
 }
 
 static int video_v4l2_release_frame(Videodev *vd, Error **errp)
 {
-    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    V4l2VideoFrameMetaData *meta = (V4l2VideoFrameMetaData*) vd->current_frame->meta;
 
-    if (video_v4l2_qbuf(vd, vv->current_frame.index) < 0) {
+    if (video_v4l2_qbuf(vd, meta->index) < 0) {
 
         vd_error_setg(vd, errp, "VIDIOC_QBUF: %s", strerror(errno));
         return VIDEODEV_RC_ERROR;
     }
 
-    vv->current_frame.index      = -1;
-    vd->current_frame.data       = NULL;
-    vd->current_frame.bytes_left = 0;
+    g_free(vd->current_frame);
+    vd->current_frame = NULL;
+
+    qemu_log("current_frame released\n");
 
     return VIDEODEV_RC_OK;
+}
+
+static void video_v4l2_install_producer(Videodev *vd)
+{
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    qemu_set_fd_handler(vv->fd, video_v4l2_claim_frame, NULL, vd);
+}
+
+static void video_v4l2_uninstall_producer(Videodev *vd)
+{
+    V4l2Videodev *vv = V4L2_VIDEODEV(vd);
+    qemu_set_fd_handler(vv->fd, NULL, NULL, NULL);
 }
 
 static void video_v4l2_class_init(ObjectClass *oc, void *data)
 {
     VideodevClass *vc = VIDEODEV_CLASS(oc);
 
-    vc->parse         = video_v4l2_parse;
-    vc->open          = video_v4l2_open;
-    vc->close         = video_v4l2_close;
-    vc->enum_modes    = video_v4l2_enum_modes;
-    vc->enum_controls = video_v4l2_enum_controls;
-    vc->set_control   = video_v4l2_set_control;
-    vc->stream_on     = video_v4l2_stream_on;
-    vc->stream_off    = video_v4l2_stream_off;
-    vc->claim_frame   = video_v4l2_claim_frame;
-    vc->release_frame = video_v4l2_release_frame;
+    vc->parse              = video_v4l2_parse;
+    vc->open               = video_v4l2_open;
+    vc->close              = video_v4l2_close;
+    vc->enum_modes         = video_v4l2_enum_modes;
+    vc->enum_controls      = video_v4l2_enum_controls;
+    vc->set_control        = video_v4l2_set_control;
+    vc->stream_on          = video_v4l2_stream_on;
+    vc->stream_off         = video_v4l2_stream_off;
+    vc->install_producer   = video_v4l2_install_producer;
+    vc->uninstall_producer = video_v4l2_uninstall_producer;
+    vc->release_frame      = video_v4l2_release_frame;
 }
 
 static const TypeInfo video_v4l2_type_info = {

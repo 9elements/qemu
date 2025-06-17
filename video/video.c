@@ -5,6 +5,7 @@
 #include "qemu/option.h"
 #include "qemu/qemu-print.h"
 #include "video/video.h"
+#include "qemu/atomic.h"
 
 static QLIST_HEAD(, Videodev) videodevs;
 
@@ -61,35 +62,7 @@ static const VideodevClass *videodev_get_class(const char *backend, Error **errp
 // @private
 static inline bool videodev_frame_ready(Videodev *vd)
 {
-    return (vd->current_frame.data != NULL) && (vd->current_frame.bytes_left != 0);
-}
-
-// @private
-static int videodev_claim_frame(Videodev *vd, Error **errp)
-{
-    VideodevClass *vc = VIDEODEV_GET_CLASS(vd);
-    int rc;
-
-    if (vc->claim_frame == NULL) {
-
-        vd_error_setg(vd, errp, "missing 'claim_frame' method!");
-        return VIDEODEV_RC_NOTSUP;
-    }
-
-    if ((rc = vc->claim_frame(vd, errp)) != VIDEODEV_RC_OK) {
-        return rc;
-    }
-
-    /*
-     * breaking this assertion means the backend
-     * messed up. It did NOT initialize the current frame
-     * properly despite returning VIDEODEV_RC_OK.
-     *
-     * The solution here is to fix the implementation
-     * of claim_frame
-     * */
-    assert(videodev_frame_ready(vd) == true);
-    return VIDEODEV_RC_OK;
+    return vd->current_frame != NULL;
 }
 
 // @private
@@ -118,6 +91,23 @@ static int videodev_release_frame(Videodev *vd, Error **errp)
      * */
     assert(videodev_frame_ready(vd) == false);
     return VIDEODEV_RC_OK;
+}
+
+// @private
+static void videodev_flush_frame_queue(Videodev *vd)
+{
+    qemu_mutex_lock(&vd->frames.lock);
+
+    while (QSIMPLEQ_EMPTY(&vd->frames.queue) == false) {
+
+        vd->current_frame = QSIMPLEQ_FIRST(&vd->frames.queue);
+        QSIMPLEQ_REMOVE_HEAD(&vd->frames.queue, next);
+
+        videodev_release_frame(vd, NULL);
+        qatomic_dec(&vd->frames.total);
+    }
+
+    qemu_mutex_unlock(&vd->frames.lock);
 }
 
 char *qemu_videodev_get_id(Videodev *vd)
@@ -310,12 +300,28 @@ int qemu_videodev_stream_on(Videodev *vd, VideoStreamOptions *opts, Error **errp
         return VIDEODEV_RC_NOTSUP;
     }
 
-    if ((rc = vc->stream_on(vd, errp)) != VIDEODEV_RC_OK)
+    if (vc->install_producer == NULL) {
+
+        vd_error_setg(vd, errp, "missing 'install_producer' method!");
+        return VIDEODEV_RC_NOTSUP;
+    }
+
+    /*
+     * 1. install the producer thread
+     * 2. turn on the video stream
+     * */
+
+    vc->install_producer(vd);
+
+    if ((rc = vc->stream_on(vd, errp)) != VIDEODEV_RC_OK) {
         return rc;
+    }
 
     vd->is_streaming = true;
     return VIDEODEV_RC_OK;
 }
+
+
 
 int qemu_videodev_stream_off(Videodev *vd, Error **errp)
 {
@@ -334,8 +340,31 @@ int qemu_videodev_stream_off(Videodev *vd, Error **errp)
         return VIDEODEV_RC_NOTSUP;
     }
 
+    if (vc->uninstall_producer == NULL) {
+
+        vd_error_setg(vd, errp, "missing 'uninstall_producer' method!");
+        return VIDEODEV_RC_NOTSUP;
+    }
+
+    /*
+     * The order is important:
+     *
+     * 1. cut-off potential write access to the VideoFrameQueue
+     *    by uninstalling the producer thread
+     * 2. release the current frame, in case we @stream_off in
+     *    the middle of a frame transfer
+     * 3. flush the entire VideoFrameQueue and hand back frames
+     *    to the backend
+     * 4. finally call the backend specific @stream_off to
+     *    tear down the actual video stream
+     * */
+
+    vc->uninstall_producer(vd);
+
     if (videodev_frame_ready(vd) == true)
         videodev_release_frame(vd, NULL);
+
+    videodev_flush_frame_queue(vd);
 
     if ((rc = vc->stream_off(vd, errp)) != VIDEODEV_RC_OK)
         return rc;
@@ -343,23 +372,39 @@ int qemu_videodev_stream_off(Videodev *vd, Error **errp)
     vd->is_streaming = false;
     return VIDEODEV_RC_OK;
 }
-
+#include "qemu/log.h"
 int qemu_videodev_read_frame(Videodev *vd, const size_t upto, VideoFrameChunk *chunk, Error **errp)
 {
-    int rc;
+    qemu_log("reading frame\n");
 
     if (videodev_frame_ready(vd) == false) {
 
-        if ((rc = videodev_claim_frame(vd, errp)) != VIDEODEV_RC_OK) {
-            return rc;
+        qemu_mutex_lock(&vd->frames.lock);
+
+        if (QSIMPLEQ_EMPTY(&vd->frames.queue)) {
+
+            qemu_log("underrun\n");
+            qemu_mutex_unlock(&vd->frames.lock);
+            vd_error_setg(vd, errp, "VideoFrameQueue: underrun");
+            return VIDEODEV_RC_UNDERRUN;
         }
+
+        vd->current_frame = QSIMPLEQ_FIRST(&vd->frames.queue);
+        QSIMPLEQ_REMOVE_HEAD(&vd->frames.queue, next);
+        qatomic_dec(&vd->frames.total);
+
+        qemu_mutex_unlock(&vd->frames.lock);
+
+        qemu_log("current_frame populated\n");
     }
 
-    chunk->size = MIN(vd->current_frame.bytes_left, upto);
-    chunk->data = vd->current_frame.data;
+    qemu_log("reading chunk from frame\n");
 
-    vd->current_frame.data        = vd->current_frame.data + chunk->size;
-    vd->current_frame.bytes_left -= chunk->size;
+    chunk->size = MIN(vd->current_frame->bytes_left, upto);
+    chunk->data = vd->current_frame->data;
+
+    vd->current_frame->data        = vd->current_frame->data + chunk->size;
+    vd->current_frame->bytes_left -= chunk->size;
 
     return VIDEODEV_RC_OK;
 }
@@ -368,7 +413,7 @@ int qemu_videodev_read_frame_done(Videodev *vd, Error **errp)
 {
     int rc;
 
-    if (vd->current_frame.bytes_left == 0) {
+    if (vd->current_frame->bytes_left == 0) {
 
         if ((rc = videodev_release_frame(vd, errp)) != VIDEODEV_RC_OK) {
             return rc;
@@ -380,12 +425,15 @@ int qemu_videodev_read_frame_done(Videodev *vd, Error **errp)
 
 size_t qemu_videodev_current_frame_length(Videodev *vd) {
 
-    return vd->current_frame.bytes_left;
+    return vd->current_frame->bytes_left;
 }
 
 static void video_instance_init(Object *obj) {
 
     Videodev *vd = VIDEODEV(obj);
+
+    QSIMPLEQ_INIT(&vd->frames.queue);
+    qemu_mutex_init(&vd->frames.lock);
 
     vd->registered   = false;
     vd->is_streaming = false;

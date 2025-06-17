@@ -412,7 +412,7 @@ static int video_gstreamer_stream_off(Videodev *vd, Error **errp)
 
     return VIDEODEV_RC_OK;
 }
-
+__attribute__ ((used))
 static int video_gstreamer_claim_frame(Videodev *vd, Error **errp)
 {
     GStreamerVideodev *gv = GSTREAMER_VIDEODEV(vd);
@@ -441,8 +441,8 @@ static int video_gstreamer_claim_frame(Videodev *vd, Error **errp)
 
     gv->current_frame.sample     = sample;
     gv->current_frame.buffer     = buffer;
-    vd->current_frame.data       = (uint8_t*) gv->current_frame.map_info.data;
-    vd->current_frame.bytes_left = gv->current_frame.map_info.size;
+    //vd->current_frame.data       = (uint8_t*) gv->current_frame.map_info.data;
+    //vd->current_frame.bytes_left = gv->current_frame.map_info.size;
 
     return VIDEODEV_RC_OK;
 }
@@ -456,8 +456,8 @@ static int video_gstreamer_release_frame(Videodev *vd, Error **errp)
 
     gv->current_frame.sample     = NULL;
     gv->current_frame.buffer     = NULL;
-    vd->current_frame.data       = NULL;
-    vd->current_frame.bytes_left = 0;
+    //vd->current_frame.data       = NULL;
+    //vd->current_frame.bytes_left = 0;
 
     return VIDEODEV_RC_OK;
 }
@@ -550,14 +550,13 @@ void video_gstreamer_class_init(ObjectClass *oc, void *data)
 {
     VideodevClass *vc = VIDEODEV_CLASS(oc);
 
-    vc->parse         = video_gstreamer_parse;
-    vc->enum_modes    = video_gstreamer_enum_modes;
-    vc->stream_on     = video_gstreamer_stream_on;
-    vc->stream_off    = video_gstreamer_stream_off;
-    vc->claim_frame   = video_gstreamer_claim_frame;
-    vc->release_frame = video_gstreamer_release_frame;
-    vc->enum_controls = video_gstreamer_enum_controls;
-    vc->set_control   = video_gstreamer_set_control;
+    vc->parse            = video_gstreamer_parse;
+    vc->enum_modes       = video_gstreamer_enum_modes;
+    vc->stream_on        = video_gstreamer_stream_on;
+    vc->stream_off       = video_gstreamer_stream_off;
+    vc->release_frame    = video_gstreamer_release_frame;
+    vc->enum_controls    = video_gstreamer_enum_controls;
+    vc->set_control      = video_gstreamer_set_control;
 }
 
 static const TypeInfo video_gstreamer_type_info = {
