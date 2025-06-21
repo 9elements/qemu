@@ -1,3 +1,13 @@
+/*
+ * Copyright 2021 Bytedance, Inc.
+ *
+ * Authors:
+ *   zhenwei pi <pizhenwei@bytedance.com>
+ *
+ * This work is licensed under the terms of the GNU GPL, version 2 or later.
+ * See the COPYING file in the top-level directory.
+ */
+
 #ifndef HW_USB_VIDEO_H
 #define HW_USB_VIDEO_H
 
@@ -92,6 +102,15 @@
 #define VC_ERROR_INVALID_CONTROL            0x06
 #define VC_ERROR_INVALID_REQUEST            0x07
 #define VC_ERROR_INVALID_VALUE_WITHIN_RANGE 0x08
+
+/* 4.3.1.7 Stream Error Code Control */
+#define VS_ERROR_PROTECTED_CONTENT      0x1
+#define VS_ERROR_INPUT_BUFFER_UNDERRUN  0x2
+#define VS_ERROR_DATA_DISCONTINUITY     0x3
+#define VS_ERROR_OUTPUT_BUFFER_UNDERRUN 0x4
+#define VS_ERROR_OUTPUT_BUFFER_OVERRUN  0x5
+#define VS_ERROR_FORMAT_CHANGE          0x6
+#define VS_ERROR_STILL_IMAGE_CAPTURE    0x7
 
 /* A.9.1. VideoControl Interface Control Selectors */
 #define VC_CONTROL_UNDEFINED          0x00
