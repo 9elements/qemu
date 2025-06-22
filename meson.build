@@ -2316,6 +2316,15 @@ if not get_option('libdw').auto() or \
                        required: get_option('libdw'))
 endif
 
+gstreamer = not_found
+gstreamer_app = not_found
+if not get_option('gstreamer').auto() or (host_os == 'linux' and have_system)
+  gstreamer = dependency('gstreamer-1.0', required: get_option('gstreamer'),
+                         method: 'pkg-config')
+  gstreamer_app = dependency('gstreamer-app-1.0', required: get_option('gstreamer'),
+                             method: 'pkg-config')
+endif
+
 v4l2 = not_found
 if not get_option('v4l2').auto() or (host_os == 'linux' and have_system)
   v4l2 = declare_dependency()
@@ -2371,6 +2380,7 @@ config_host_data.set('CONFIG_AUDIO_DRIVERS',
 
 if have_system
   video_backend_available = {
+    'gstreamer': gstreamer.found() and gstreamer_app.found(),
     'v4l2': v4l2.found(),
   }
   foreach k, v: video_backend_available
@@ -4988,6 +4998,7 @@ summary(summary_info, bool_yn: true, section: 'Network backends')
 
 # Video backends
 summary_info = {}
+summary_info += {'gstreamer support':     gstreamer.found() and gstreamer_app.found()}
 summary_info += {'v4l2 support':          v4l2}
 summary(summary_info, bool_yn: true, section: 'Video backends')
 
