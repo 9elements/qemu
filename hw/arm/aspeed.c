@@ -176,7 +176,7 @@ struct AspeedMachineState {
 
 /* AST2600 evb hardware value */
 #define AST2600_EVB_HW_STRAP1 0x000000C0
-#define AST2600_EVB_HW_STRAP2 0x00000003
+#define AST2600_EVB_HW_STRAP2 0x0000000B
 
 /* Tacoma hardware value */
 #define TACOMA_BMC_HW_STRAP1  0x00000000
@@ -519,14 +519,11 @@ static void ast2500_evb_i2c_init(AspeedMachineState *bmc)
 static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
 {
     AspeedSoCState *soc = &bmc->soc;
-    uint8_t *eeprom_buf = g_malloc0(8 * 1024);
+    uint8_t *eeprom_buf = g_malloc0(32 * 1024);
 
-    smbus_eeprom_init_one(aspeed_i2c_get_bus(&soc->i2c, 7), 0x50,
+    smbus_eeprom_init_one(aspeed_i2c_get_bus(&soc->i2c, 8), 0x51,
                           eeprom_buf);
 
-    /* LM75 is compatible with TMP105 driver */
-    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 8),
-                     TYPE_TMP105, 0x4d);
 }
 
 static void yosemitev2_bmc_i2c_init(AspeedMachineState *bmc)
@@ -1316,9 +1313,9 @@ static void aspeed_machine_tiogapass_class_init(ObjectClass *oc, void *data)
     amc->num_cs    = 2;
     amc->i2c_init  = tiogapass_bmc_i2c_init;
     mc->default_ram_size       = 1 * GiB;
-    mc->default_cpus = mc->min_cpus = mc->max_cpus =
-        aspeed_soc_num_cpus(amc->soc_name);
-        aspeed_soc_num_cpus(amc->soc_name);
+    mc->default_cpus = mc->min_cpus = mc->max_cpus = 
+       aspeed_soc_num_cpus(amc->soc_name);
+       aspeed_soc_num_cpus(amc->soc_name);
 };
 
 static void aspeed_machine_sonorapass_class_init(ObjectClass *oc, void *data)
@@ -1365,12 +1362,13 @@ static void aspeed_machine_ast2600_evb_class_init(ObjectClass *oc, void *data)
     amc->hw_strap1 = AST2600_EVB_HW_STRAP1;
     amc->hw_strap2 = AST2600_EVB_HW_STRAP2;
     amc->fmc_model = "mx66u51235f";
-    amc->spi_model = "mx66u51235f";
-    amc->num_cs    = 1;
-    amc->macs_mask = ASPEED_MAC0_ON | ASPEED_MAC1_ON | ASPEED_MAC2_ON |
+    //amc->spi_model = "mx66u51235f";
+    amc->num_cs    = 2;
+    amc->macs_mask = ASPEED_MAC2_ON |
                      ASPEED_MAC3_ON;
     amc->i2c_init  = ast2600_evb_i2c_init;
-    mc->default_ram_size = 1 * GiB;
+    amc->uart_default = ASPEED_DEV_UART1;
+    mc->default_ram_size = 2 * GiB;
     mc->default_cpus = mc->min_cpus = mc->max_cpus =
         aspeed_soc_num_cpus(amc->soc_name);
 };
