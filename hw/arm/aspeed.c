@@ -21,6 +21,7 @@
 #include "hw/misc/pca9552.h"
 #include "hw/nvram/eeprom_at24c.h"
 #include "hw/sensor/tmp105.h"
+#include "hw/sensor/bme280.h"
 #include "hw/misc/led.h"
 #include "hw/qdev-properties.h"
 #include "sysemu/block-backend.h"
@@ -523,6 +524,13 @@ static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
 
     smbus_eeprom_init_one(aspeed_i2c_get_bus(&soc->i2c, 8), 0x51,
                           eeprom_buf);
+
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 7),
+                     TYPE_BME280, 0x76);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 12),
+                     TYPE_BME280, 0x76);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 15),
+                     TYPE_BME280, 0x76);
 
 }
 
