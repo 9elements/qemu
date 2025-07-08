@@ -556,6 +556,7 @@ config ASPEED_SOC
     select PMBUS
     select MAX31785
     select BME280
+    select MAX8952
 
 config MPS2
     bool

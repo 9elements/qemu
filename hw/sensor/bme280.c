@@ -14,19 +14,27 @@
 static void bme280_reset(DeviceState *dev)
 {
     BME280State *s = BME280(dev);
+static const uint8_t default_regs[NUM_REGISTERS] = {
+        // Device ID and basic registers
+        [BME280_REG_ID]         = 0x60,
+        [BME280_REG_STATUS]     = 0x00,
+        [BME280_REG_CTRL_HUM]   = 0x00,
+        [BME280_REG_CTRL_MEAS]  = 0x27,
+        [BME280_REG_CONFIG]     = 0x00,
 
-    static const uint8_t default_regs[NUM_REGISTERS] = {
-        // fill array truncated to NUM_REGISTERS size
-        // initialize calibration registers, ID = 0x60, status=0, etc.
-        [BME280_REG_ID] = 0x60,  // Device ID
-        [BME280_REG_STATUS] = 0x00, // Status register
-        [BME280_REG_CTRL_HUM] = 0x00, // Humidity
-        [BME280_REG_CTRL_MEAS] = 0x27, // Control measurement
-        [BME280_REG_CONFIG] = 0x00, // Configuration
-        [BME280_REG_PRESS_MSB] = 0x00, // Pressure MSB
-        [BME280_REG_TEMP_MSB] = 0x00, // Temperature
-        [BME280_REG_HUM_MSB] = 0x00, // Humidity MSB
-    };
+        // Data registers
+        [BME280_REG_PRESS_MSB]      = 0x80,
+        [BME280_REG_PRESS_MSB + 1]  = 0x00,
+        [BME280_REG_PRESS_MSB + 2]  = 0x00,
+
+        [BME280_REG_TEMP_MSB]       = 0x64,
+        [BME280_REG_TEMP_MSB + 1]   = 0x00,
+        [BME280_REG_TEMP_MSB + 2]   = 0x00,
+
+        [BME280_REG_HUM_MSB]        = 0x33,
+        [BME280_REG_HUM_MSB + 1]    = 0x33,
+
+};
 
     memcpy(s->regs, default_regs, sizeof(s->regs));
     s->pointer = 0;

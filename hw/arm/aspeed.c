@@ -22,6 +22,7 @@
 #include "hw/nvram/eeprom_at24c.h"
 #include "hw/sensor/tmp105.h"
 #include "hw/sensor/bme280.h"
+#include "hw/sensor/max8952.h"
 #include "hw/misc/led.h"
 #include "hw/qdev-properties.h"
 #include "sysemu/block-backend.h"
@@ -531,6 +532,11 @@ static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
                      TYPE_BME280, 0x76);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 15),
                      TYPE_BME280, 0x76);
+
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 3),
+                     TYPE_MAX8952, 0x60);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9),
+                     TYPE_MAX8952, 0x60);
 
 }
 

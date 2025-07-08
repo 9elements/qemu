@@ -43,3 +43,8 @@ config BME280
     bool
     depends on I2C
     default y if I2C_DEVICES
+
+config MAX8952
+    bool
+    depends on I2C
+    default y if I2C_DEVICES
