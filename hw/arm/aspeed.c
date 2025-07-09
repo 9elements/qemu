@@ -522,10 +522,9 @@ static void ast2500_evb_i2c_init(AspeedMachineState *bmc)
 static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
 {
     AspeedSoCState *soc = &bmc->soc;
-    uint8_t *eeprom_buf = g_malloc0(32 * 1024);
 
-    smbus_eeprom_init_one(aspeed_i2c_get_bus(&soc->i2c, 8), 0x51,
-                          eeprom_buf);
+    at24c_eeprom_init_rom(aspeed_i2c_get_bus(&soc->i2c, 8), 0x51, 32 * KiB, wcu_bmc_fruid,
+                          wcu_bmc_fruid_len);
 
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 7),
                      TYPE_BME280, 0x76);
