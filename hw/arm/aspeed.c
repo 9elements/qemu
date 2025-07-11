@@ -1402,7 +1402,7 @@ static void aspeed_machine_ast2600_evb_class_init(ObjectClass *oc, void *data)
     amc->soc_name  = "ast2600-a3";
     amc->hw_strap1 = AST2600_EVB_HW_STRAP1;
     amc->hw_strap2 = AST2600_EVB_HW_STRAP2;
-    amc->fmc_model = "mx66u51235f";
+    amc->fmc_model = "w25q512jv";
     //amc->spi_model = "mx66u51235f";
     amc->num_cs    = 2;
     amc->macs_mask = ASPEED_MAC2_ON |
