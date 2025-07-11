@@ -48,3 +48,13 @@ config MAX8952
     bool
     depends on I2C
     default y if I2C_DEVICES
+
+config MAX6639
+    bool
+    depends on I2C
+    default y if I2C_DEVICES
+
+config MAX5978
+    bool
+    depends on I2C
+    default y if I2C_DEVICES

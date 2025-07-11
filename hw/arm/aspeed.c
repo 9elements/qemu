@@ -23,6 +23,8 @@
 #include "hw/sensor/tmp105.h"
 #include "hw/sensor/bme280.h"
 #include "hw/sensor/max8952.h"
+#include "hw/sensor/max6639.h"
+#include "hw/sensor/max5978.h"
 #include "hw/acpi/tpm.h"
 #include "hw/misc/led.h"
 #include "hw/qdev-properties.h"
@@ -522,6 +524,7 @@ static void ast2500_evb_i2c_init(AspeedMachineState *bmc)
 static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
 {
     AspeedSoCState *soc = &bmc->soc;
+    I2CSlave *ssbmux, *wcumux;
 
     at24c_eeprom_init_rom(aspeed_i2c_get_bus(&soc->i2c, 8), 0x51, 32 * KiB, wcu_bmc_fruid,
                           wcu_bmc_fruid_len);
@@ -538,10 +541,30 @@ static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9),
                      TYPE_MAX8952, 0x60);
 
-    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 1),
-                     TYPE_PCA9552, 0x70);
-    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 5),
-                     TYPE_PCA9552, 0x70);
+    wcumux = i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 1),
+                     "pca9548", 0x70);
+    ssbmux = i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 5),
+                     "pca9548", 0x70);
+
+    i2c_slave_create_simple(pca954x_i2c_get_bus(wcumux, 0), TYPE_MAX6639,
+                     0x2e);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(wcumux, 2), TYPE_MAX6639,
+                     0x2e);
+
+    i2c_slave_create_simple(pca954x_i2c_get_bus(ssbmux, 0), TYPE_MAX5978,
+                     0x3a);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(ssbmux, 1), TYPE_MAX5978,
+                     0x3a);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(ssbmux, 2), TYPE_MAX5978,
+                     0x3a);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(ssbmux, 3), TYPE_MAX5978,
+                     0x3a);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(ssbmux, 4), TYPE_MAX5978,
+                     0x3a);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(ssbmux, 5), TYPE_MAX5978,
+                     0x3a);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(ssbmux, 6), TYPE_MAX5978,
+                     0x3a);
 }
 
 static void yosemitev2_bmc_i2c_init(AspeedMachineState *bmc)
