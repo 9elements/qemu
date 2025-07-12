@@ -533,6 +533,8 @@ static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
                      TYPE_BME280, 0x76);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 12),
                      TYPE_BME280, 0x76);
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 14),
+                     "ir38263", 0x10);
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 15),
                      TYPE_BME280, 0x76);
 

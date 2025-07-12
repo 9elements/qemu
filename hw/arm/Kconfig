@@ -559,6 +559,7 @@ config ASPEED_SOC
     select MAX8952
     select MAX6639
     select MAX5978
+    select IR38263
 
 config MPS2
     bool
