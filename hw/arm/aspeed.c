@@ -543,6 +543,9 @@ static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
     i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 9),
                      TYPE_MAX8952, 0x60);
 
+    i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 4),
+                     "lm5066i", 0x40);
+
     wcumux = i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 1),
                      "pca9548", 0x70);
     ssbmux = i2c_slave_create_simple(aspeed_i2c_get_bus(&soc->i2c, 5),
