@@ -10,8 +10,10 @@ deprecated warning I was using upstream qemu which worked just fine for me.
 
 Building
 ========
-./configure --target-list=arm-softmmu --disable-docs
+```
+./configure --target-list=arm-softmmu --disable-docs --diable-fuse
 make
+```
 
 Yocto changes
 =============
