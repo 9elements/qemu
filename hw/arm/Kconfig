@@ -561,6 +561,7 @@ config ASPEED_SOC
     select MAX5978
     select IR38263
     select LM5066I
+    select ADS7138
 
 config MPS2
     bool

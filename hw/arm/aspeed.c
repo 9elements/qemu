@@ -22,6 +22,7 @@
 #include "hw/nvram/eeprom_at24c.h"
 #include "hw/sensor/tmp105.h"
 #include "hw/sensor/bme280.h"
+#include "hw/sensor/ads7138.h"
 #include "hw/sensor/max8952.h"
 #include "hw/sensor/max6639.h"
 #include "hw/sensor/max5978.h"
@@ -555,6 +556,12 @@ static void ast2600_evb_i2c_init(AspeedMachineState *bmc)
                      0x2e);
     i2c_slave_create_simple(pca954x_i2c_get_bus(wcumux, 2), TYPE_MAX6639,
                      0x2e);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(wcumux, 1), TYPE_ADS7138,
+                     0x10);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(wcumux, 6), TYPE_ADS7138,
+                     0x10);
+    i2c_slave_create_simple(pca954x_i2c_get_bus(wcumux, 5), TYPE_ADS7138,
+                     0x10);
 
     i2c_slave_create_simple(pca954x_i2c_get_bus(ssbmux, 0), TYPE_MAX5978,
                      0x3a);

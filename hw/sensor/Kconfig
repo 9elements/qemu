@@ -68,3 +68,8 @@ config LM5066I
     bool
     depends on I2C
     default y if I2C_DEVICES
+
+config ADS7138
+    bool
+    depends on I2C
+    default y if I2C_DEVICES
