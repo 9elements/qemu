@@ -1279,6 +1279,7 @@ static void fby35_i2c_init(AspeedMachineState *bmc)
 {
     AspeedSoCState *soc = bmc->soc;
     I2CBus *i2c[16];
+    I2CSlave *fan_mux;
 
     for (int i = 0; i < 16; i++) {
         i2c[i] = aspeed_i2c_get_bus(&soc->i2c, i);
@@ -1288,8 +1289,12 @@ static void fby35_i2c_init(AspeedMachineState *bmc)
     i2c_slave_create_simple(i2c[8], TYPE_TMP421, 0x1f);
     /* Hotswap controller is actually supposed to be mp5920 or ltc4282. */
     i2c_slave_create_simple(i2c[11], "adm1272", 0x44);
+
     i2c_slave_create_simple(i2c[12], TYPE_LM75, 0x4e);
     i2c_slave_create_simple(i2c[12], TYPE_LM75, 0x4f);
+
+    // Yosemite4 fanboard connection
+    fan_mux = i2c_slave_create_simple(i2c[14], TYPE_PCA9546, 0x74);
 
     at24c_eeprom_init(i2c[4], 0x51, 128 * KiB);
     at24c_eeprom_init(i2c[6], 0x51, 128 * KiB);
@@ -1344,6 +1349,14 @@ static void fby35_i2c_init(AspeedMachineState *bmc)
                           fby4_sentinel_dome_chassis_fruid_len);
     at24c_eeprom_init_rom(i2c[8], chassis_addr, 128 * KiB, fby4_sentinel_dome_chassis_fruid,
                           fby4_sentinel_dome_chassis_fruid_len);
+
+    // Fanboards
+    at24c_eeprom_init_rom(pca954x_i2c_get_bus(fan_mux, 0),0x52, 128 * KiB,
+            fby4_fanboard_fsc_max_adc_ti_led_ons_efuse_max,
+            fby4_fanboard_fsc_max_adc_ti_led_ons_efuse_max_len);
+    at24c_eeprom_init_rom(pca954x_i2c_get_bus(fan_mux,1), 0x52, 128 * KiB,
+            fby4_fanboard_fsc_max_adc_ti_led_nxp_efuse_max,
+            fby4_fanboard_fsc_max_adc_ti_led_nxp_efuse_max_len);
     /*
      * TODO: There is a multi-master i2c connection to an AST1030 MiniBMC on
      * buses 0, 1, 2, 3, and 9. Source address 0x10, target address 0x20 on

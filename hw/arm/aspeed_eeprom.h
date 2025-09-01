@@ -29,6 +29,12 @@ extern const size_t fby4_sentinel_dome_chassis_fruid_len;
 extern const uint8_t fby4_sentinel_dome_enclosure_fruid[];
 extern const size_t fby4_sentinel_dome_enclosure_fruid_len;
 
+extern const uint8_t fby4_fanboard_fsc_max_adc_ti_led_ons_efuse_max[];
+extern const size_t fby4_fanboard_fsc_max_adc_ti_led_ons_efuse_max_len;
+
+extern const uint8_t fby4_fanboard_fsc_max_adc_ti_led_nxp_efuse_max[];
+extern const size_t fby4_fanboard_fsc_max_adc_ti_led_nxp_efuse_max_len;
+
 extern const uint8_t yosemitev2_bmc_fruid[];
 extern const size_t yosemitev2_bmc_fruid_len;
 
