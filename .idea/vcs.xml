@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/subprojects/berkeley-softfloat-3" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/subprojects/berkeley-testfloat-3" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/subprojects/dtc" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/subprojects/keycodemapdb" vcs="Git" />
+  </component>
+</project>
