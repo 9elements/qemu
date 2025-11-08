@@ -379,7 +379,7 @@ static size_t nmi_get_types(MCTPI2CEndpoint *mctp, const uint8_t **data)
     return sizeof(buf);
 }
 
-static void nvme_mi_class_init(ObjectClass *oc, const void *data)
+static void nvme_mi_class_init(ObjectClass *oc, void *data)
 {
     MCTPI2CEndpointClass *mc = MCTP_I2C_ENDPOINT_CLASS(oc);
 

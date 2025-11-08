@@ -402,7 +402,7 @@ static const Property mctp_i2c_props[] = {
     DEFINE_PROP_UINT8("eid", MCTPI2CEndpoint, my_eid, 0x9),
 };
 
-static void i2c_mctp_class_init(ObjectClass *oc, const void *data)
+static void i2c_mctp_class_init(ObjectClass *oc, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
     I2CSlaveClass *k = I2C_SLAVE_CLASS(oc);
