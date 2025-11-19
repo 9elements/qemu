@@ -372,3 +372,4 @@ aspeed_sliio_read(uint64_t offset, unsigned int size, uint32_t data) "To 0x%" PR
 i2c_echo_event(const char *id, const char *event) "%s: %s"
 i2c_echo_recv(const char *id, uint8_t data) "%s: recv 0x%02" PRIx8
 i2c_echo_send(const char *id, uint8_t data) "%s: send 0x%02" PRIx8
+i2c_echo_bh(const char *id, const char *event) "%s: %s"

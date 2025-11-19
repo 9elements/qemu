@@ -42,6 +42,7 @@ static void i2c_echo_bh(void *opaque)
 
     switch (state->state) {
     case I2C_ECHO_STATE_IDLE:
+        trace_i2c_echo_bh(DEVICE(&state->parent_obj)->canonical_path, "I2C_ECHO_STATE_IDLE");
         return;
 
     case I2C_ECHO_STATE_START_SEND:
@@ -51,6 +52,8 @@ static void i2c_echo_bh(void *opaque)
 
         state->pos++;
         state->state = I2C_ECHO_STATE_ACK;
+
+        trace_i2c_echo_bh(DEVICE(&state->parent_obj)->canonical_path, "I2C_ECHO_STATE_START_SEND");
         return;
 
     case I2C_ECHO_STATE_ACK:
@@ -62,9 +65,9 @@ static void i2c_echo_bh(void *opaque)
             break;
         }
 
+        trace_i2c_echo_bh(DEVICE(&state->parent_obj)->canonical_path, "I2C_ECHO_STATE_ACK");
         return;
     }
-
 
     i2c_end_transfer(state->bus);
 release_bus:
@@ -91,10 +94,11 @@ static int i2c_echo_event(I2CSlave *s, enum i2c_event event)
         break;
 
     case I2C_FINISH:
-        state->pos = 0;
-        state->state = I2C_ECHO_STATE_START_SEND;
-        i2c_bus_master(state->bus, state->bh);
-
+        if (state->pos > 0) {
+            state->pos = 0;
+            state->state = I2C_ECHO_STATE_START_SEND;
+            i2c_bus_master(state->bus, state->bh);
+        }
         trace_i2c_echo_event(DEVICE(s)->canonical_path, "I2C_FINISH");
         break;
 
