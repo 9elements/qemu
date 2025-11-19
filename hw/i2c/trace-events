@@ -56,3 +56,12 @@ npcm7xx_smbus_recv_fifo(const char *id, uint8_t received, uint8_t expected) "%s 
 
 pca954x_write_bytes(uint8_t value) "PCA954X write data: 0x%02x"
 pca954x_read_data(uint8_t value) "PCA954X read data: 0x%02x"
+
+# chardev_i2c.c
+
+chardev_i2c_bh(const char *id, const char *event) "%s: %s"
+chardev_i2c_bh_error(const char *id, const char *error) "%s: error: %s"
+chardev_i2c_event(const char *id, const char *event) "%s: %s"
+chardev_i2c_send(const char *id, uint8_t data, uint16_t buf_len, int ret) "%s: send 0x%02" PRIx8 " buf_len=%u ret=%d"
+chardev_i2c_chardev_write(const char *id, const char *type, uint16_t len, int result) "%s: chardev write %s len=%u result=%d"
+chardev_i2c_chardev_read(const char *id, const char *type, uint16_t len, int result) "%s: chardev read %s len=%u result=%d"
