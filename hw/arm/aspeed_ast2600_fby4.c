@@ -11,6 +11,7 @@
 #include "hw/arm/machines-qom.h"
 #include "hw/arm/aspeed.h"
 #include "hw/arm/aspeed_soc.h"
+#include "hw/i2c/i2c_mux_pca954x.h"
 #include "hw/nvram/eeprom_at24c.h"
 #include "hw/sensor/tmp105.h"
 #include "system/reset.h"
@@ -151,12 +152,13 @@ static const uint8_t fby4_fanboard_fsc_max_adc_ti_led_nxp_efuse_max[] = {
     0x4d, 0x41, 0x58, 0xc0, 0xc0, 0xc0, 0xc1, 0x00, 0x58, 0x01, 0x03,
     0x19, 0xc0, 0xcb, 0x59, 0x6f, 0x73, 0x65, 0x6d, 0x69, 0x74, 0x65,
     0x20, 0x56, 0x34, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc1, 0x00, 0xde};
-
 static const size_t fby4_fanboard_fsc_max_adc_ti_led_nxp_efuse_max_len = sizeof(fby4_fanboard_fsc_max_adc_ti_led_nxp_efuse_max);
 
 static void fby4_i2c_init(AspeedMachineState *bmc) {
   AspeedSoCState *soc = bmc->soc;
   I2CBus *i2c[16];
+  I2CSlave *mux1;
+  I2CSlave *mux2;
   I2CSlave *fan_mux;
 
   for (int i = 0; i < 16; i++) {
@@ -171,6 +173,12 @@ static void fby4_i2c_init(AspeedMachineState *bmc) {
   i2c_slave_create_simple(i2c[12], TYPE_LM75, 0x4e);
   i2c_slave_create_simple(i2c[12], TYPE_LM75, 0x4f);
 
+  // Yosemite4 baseboard & chassis connection
+  // i2c-mux@70
+  mux1 = i2c_slave_create_simple(i2c[8], TYPE_PCA9546, 0x70);
+  // i2c-mux@71
+  mux2 = i2c_slave_create_simple(i2c[9], TYPE_PCA9546, 0x71);
+
   // Yosemite4 fanboard connection
   fan_mux = i2c_slave_create_simple(i2c[14], TYPE_PCA9546, 0x74);
 
@@ -180,67 +188,85 @@ static void fby4_i2c_init(AspeedMachineState *bmc) {
                         fby35_nic_fruid_len);
   at24c_eeprom_init_rom(i2c[11], 0x51, 128 * KiB, fby35_bb_fruid,
                         fby35_bb_fruid_len);
-  at24c_eeprom_init_rom(i2c[11], 0x54, 128 * KiB, fby35_bmc_fruid,
-                        fby35_bmc_fruid_len);
+  at24c_eeprom_init_rom(i2c[11], 0x54, 128 * KiB, fby4_bmc_storage_module,
+                        fby4_bmc_storage_module_len);
 
-  /* Sentinel Dome Board EEPROMS */
-  const uint8_t enclosure_addr = 0x51;
-  const uint8_t board_addr = 0x54;
-  const uint8_t chassis_addr = 0x55;
+  /* Sentinel Dome EEPROMS */
+  const uint8_t enclosure_addr = 0x50;
+  const uint8_t board_addr = 0x51;
+  const uint8_t chassis_addr = 0x54;
 
-  // Enclosure
-  at24c_eeprom_init_rom(i2c[1], enclosure_addr, 128 * KiB,
+  // Yosemite4 Enclosure Chassis
+  // i2c-mux@70 imux16
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 0), enclosure_addr, 128 * KiB,
                         fby4_sentinel_dome_enclosure_fruid,
                         fby4_sentinel_dome_enclosure_fruid_len);
 
-  // Board
-  at24c_eeprom_init_rom(i2c[1], board_addr, 128 * KiB,
+  // Yosemite4 Sentinel Dome T1 without retimer Baseboards
+  // i2c-mux@70 imux16
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 0), board_addr, 128 * KiB,
                         fby4_sentinel_dome_board_fruid,
                         fby4_sentinel_dome_board_fruid_len);
-  at24c_eeprom_init_rom(i2c[2], board_addr, 128 * KiB,
+  // i2c-mux@70 imux17 eeprom 0x51
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 1), board_addr, 128 * KiB,
                         fby4_sentinel_dome_board_fruid,
                         fby4_sentinel_dome_board_fruid_len);
-  at24c_eeprom_init_rom(i2c[3], board_addr, 128 * KiB,
+  // i2c-mux@70 imux18 eeprom 0x51
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 2), board_addr, 128 * KiB,
                         fby4_sentinel_dome_board_fruid,
                         fby4_sentinel_dome_board_fruid_len);
-  at24c_eeprom_init_rom(i2c[4], board_addr, 128 * KiB,
+  // i2c-mux@70 imux19 eeprom 0x51
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 3), board_addr, 128 * KiB,
                         fby4_sentinel_dome_board_fruid,
                         fby4_sentinel_dome_board_fruid_len);
-  at24c_eeprom_init_rom(i2c[5], board_addr, 128 * KiB,
+  // i2c-mux@71 imux20 eeprom 0x51
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 0), board_addr, 128 * KiB,
                         fby4_sentinel_dome_board_fruid,
                         fby4_sentinel_dome_board_fruid_len);
-  at24c_eeprom_init_rom(i2c[6], board_addr, 128 * KiB,
+  // i2c-mux@71 imux21 eeprom 0x51
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 1), board_addr, 128 * KiB,
                         fby4_sentinel_dome_board_fruid,
                         fby4_sentinel_dome_board_fruid_len);
-  at24c_eeprom_init_rom(i2c[7], board_addr, 128 * KiB,
+  // i2c-mux@71 imux22 eeprom 0x51
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 2), board_addr, 128 * KiB,
                         fby4_sentinel_dome_board_fruid,
                         fby4_sentinel_dome_board_fruid_len);
-  at24c_eeprom_init_rom(i2c[8], board_addr, 128 * KiB,
+  // i2c-mux@71 imux23 eeprom 0x51
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 3), board_addr, 128 * KiB,
                         fby4_sentinel_dome_board_fruid,
                         fby4_sentinel_dome_board_fruid_len);
-  // Chassis
-  at24c_eeprom_init_rom(i2c[1], chassis_addr, 128 * KiB,
+
+  // Yosemite4 Blade Chassis
+  // i2c-mux@70 imux16 eeprom 0x54
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 0), chassis_addr, 128 * KiB,
                         fby4_sentinel_dome_chassis_fruid,
                         fby4_sentinel_dome_chassis_fruid_len);
-  at24c_eeprom_init_rom(i2c[2], chassis_addr, 128 * KiB,
+  // i2c-mux@70 imux17 eeprom 0x54
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 1), chassis_addr, 128 * KiB,
                         fby4_sentinel_dome_chassis_fruid,
                         fby4_sentinel_dome_chassis_fruid_len);
-  at24c_eeprom_init_rom(i2c[3], chassis_addr, 128 * KiB,
+  // i2c-mux@70 imux18 eeprom 0x54
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 2), chassis_addr, 128 * KiB,
                         fby4_sentinel_dome_chassis_fruid,
                         fby4_sentinel_dome_chassis_fruid_len);
-  at24c_eeprom_init_rom(i2c[4], chassis_addr, 128 * KiB,
+  // i2c-mux@70 imux19 eeprom 0x54
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 3), chassis_addr, 128 * KiB,
                         fby4_sentinel_dome_chassis_fruid,
                         fby4_sentinel_dome_chassis_fruid_len);
-  at24c_eeprom_init_rom(i2c[5], chassis_addr, 128 * KiB,
+  // i2c-mux@70 imux20 eeprom 0x54
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 0), chassis_addr, 128 * KiB,
                         fby4_sentinel_dome_chassis_fruid,
                         fby4_sentinel_dome_chassis_fruid_len);
-  at24c_eeprom_init_rom(i2c[6], chassis_addr, 128 * KiB,
+  // i2c-mux@70 imux21 eeprom 0x54
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 1), chassis_addr, 128 * KiB,
                         fby4_sentinel_dome_chassis_fruid,
                         fby4_sentinel_dome_chassis_fruid_len);
-  at24c_eeprom_init_rom(i2c[7], chassis_addr, 128 * KiB,
+  // i2c-mux@70 imux22 eeprom 0x54
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 2), chassis_addr, 128 * KiB,
                         fby4_sentinel_dome_chassis_fruid,
                         fby4_sentinel_dome_chassis_fruid_len);
-  at24c_eeprom_init_rom(i2c[8], chassis_addr, 128 * KiB,
+  // i2c-mux@70 imux23 eeprom 0x54
+  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 3), chassis_addr, 128 * KiB,
                         fby4_sentinel_dome_chassis_fruid,
                         fby4_sentinel_dome_chassis_fruid_len);
 
