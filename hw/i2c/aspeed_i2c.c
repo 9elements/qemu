@@ -1290,6 +1290,7 @@ static int aspeed_i2c_bus_new_slave_event(AspeedI2CBus *bus,
 {
     switch (event) {
     case I2C_START_SEND_ASYNC:
+        trace_aspeed_i2c_bus_slave_event(bus->id, "I2C_START_SEND_ASYNC");
         if (!SHARED_ARRAY_FIELD_EX32(bus->regs, R_I2CS_CMD, RX_DMA_EN)) {
             qemu_log_mask(LOG_GUEST_ERROR,
                           "%s: Slave mode RX DMA is not enabled\n", __func__);
@@ -1304,6 +1305,7 @@ static int aspeed_i2c_bus_new_slave_event(AspeedI2CBus *bus,
         i2c_ack(bus->bus);
         break;
     case I2C_FINISH:
+        trace_aspeed_i2c_bus_slave_event(bus->id, "I2C_FINISH");
         ARRAY_FIELD_DP32(bus->regs, I2CS_INTR_STS, PKT_CMD_DONE, 1);
         ARRAY_FIELD_DP32(bus->regs, I2CS_INTR_STS, SLAVE_ADDR_RX_MATCH, 1);
         SHARED_ARRAY_FIELD_DP32(bus->regs, R_I2CS_INTR_STS, NORMAL_STOP, 1);
@@ -1311,6 +1313,7 @@ static int aspeed_i2c_bus_new_slave_event(AspeedI2CBus *bus,
         aspeed_i2c_bus_raise_slave_interrupt(bus);
         break;
     default:
+        trace_aspeed_i2c_bus_slave_event(bus->id, "UNIMPLEMENTED");
         qemu_log_mask(LOG_UNIMP, "%s: i2c event %d unimplemented\n",
                       __func__, event);
         return -1;
@@ -1335,6 +1338,7 @@ static int aspeed_i2c_bus_slave_event(I2CSlave *slave, enum i2c_event event)
 
     switch (event) {
     case I2C_START_SEND_ASYNC:
+        trace_aspeed_i2c_bus_slave_event(bus->id, "I2C_START_SEND_ASYNC");
         /* Bit[0] == 0 indicates "send". */
         SHARED_ARRAY_FIELD_DP32(bus->regs, reg_byte_buf, RX_BUF, dev_addr << 1);
 
@@ -1346,6 +1350,7 @@ static int aspeed_i2c_bus_slave_event(I2CSlave *slave, enum i2c_event event)
         break;
 
     case I2C_FINISH:
+        trace_aspeed_i2c_bus_slave_event(bus->id, "I2C_FINISH");
         SHARED_ARRAY_FIELD_DP32(bus->regs, reg_intr_sts, NORMAL_STOP, 1);
 
         aspeed_i2c_set_state(bus, I2CD_IDLE);
@@ -1353,6 +1358,7 @@ static int aspeed_i2c_bus_slave_event(I2CSlave *slave, enum i2c_event event)
         break;
 
     default:
+        trace_aspeed_i2c_bus_slave_event(bus->id, "UNIMPLEMENTED");
         return -1;
     }
 
@@ -1363,14 +1369,17 @@ static int aspeed_i2c_bus_slave_event(I2CSlave *slave, enum i2c_event event)
 
 static void aspeed_i2c_bus_new_slave_send_async(AspeedI2CBus *bus, uint8_t data)
 {
+    uint32_t rx_len = ARRAY_FIELD_EX32(bus->regs, I2CS_DMA_LEN_STS, RX_LEN);
+
+    trace_aspeed_i2c_bus_slave_send_async(bus->id, data, rx_len);
+
     assert(address_space_write(&bus->controller->dram_as,
                                bus->dma_dram_offset,
                                MEMTXATTRS_UNSPECIFIED, &data, 1) == MEMTX_OK);
 
     bus->dma_dram_offset++;
     bus->regs[R_I2CC_DMA_LEN]--;
-    ARRAY_FIELD_DP32(bus->regs, I2CS_DMA_LEN_STS, RX_LEN,
-                     ARRAY_FIELD_EX32(bus->regs, I2CS_DMA_LEN_STS, RX_LEN) + 1);
+    ARRAY_FIELD_DP32(bus->regs, I2CS_DMA_LEN_STS, RX_LEN, rx_len + 1);
     i2c_ack(bus->bus);
 }
 
@@ -1384,6 +1393,8 @@ static void aspeed_i2c_bus_slave_send_async(I2CSlave *slave, uint8_t data)
     if (aspeed_i2c_is_new_mode(bus->controller)) {
         return aspeed_i2c_bus_new_slave_send_async(bus, data);
     }
+
+    trace_aspeed_i2c_bus_slave_send_async(bus->id, data, 0);
 
     SHARED_ARRAY_FIELD_DP32(bus->regs, reg_byte_buf, RX_BUF, data);
     SHARED_ARRAY_FIELD_DP32(bus->regs, reg_intr_sts, RX_DONE, 1);
