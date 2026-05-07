@@ -146,6 +146,11 @@ static void fby4_i2c_init(AspeedMachineState *bmc) {
   const uint8_t enclosure_addr = 0x50;
   const uint8_t board_addr = 0x51;
   const uint8_t chassis_addr = 0x54;
+  const uint8_t bmc_storage_module_addr=0x54;
+
+  // Yosemite4 BMC storage module
+  at24c_eeprom_init_rom(i2c[11], bmc_storage_module_addr, 128 * KiB,
+                        fby4_bmc_storage_module, fby4_bmc_storage_module_len);
 
   // Yosemite4 Enclosure Chassis
   // i2c-mux@70 imux16
