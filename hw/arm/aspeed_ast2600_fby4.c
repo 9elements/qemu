@@ -32,6 +32,26 @@ static const uint8_t fby4_bmc_storage_module[] = {
 };
 static const size_t fby4_bmc_storage_module_len = sizeof(fby4_bmc_storage_module);
 
+static const uint8_t fby4_kioxia_ssd_vpd[] = {
+0x01, 0x00, 0x00, 0x00, 0x01, 0x0f, 0x00, 0xef, 0x01, 0x0e, 0x19, 0xc8, 0x4b, 0x49, 0x4f, 0x58,
+0x49, 0x41, 0x00, 0x00, 0xd8, 0x43, 0x44, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe8, 0x4b, 0x49,
+0x4f, 0x58, 0x49, 0x41, 0x20, 0x4b, 0x43, 0x44, 0x38, 0x58, 0x50, 0x55, 0x47, 0x33, 0x30, 0x54,
+0x37, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc2, 0x31, 0x30, 0xd4, 0x59, 0x45, 0x51, 0x30, 0x41, 0x30,
+0x31, 0x51, 0x30, 0x57, 0x54, 0x33, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0xc1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xd3, 0x0b, 0x02, 0x3b, 0xd8, 0xe0, 0x00, 0x11, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x19, 0x19, 0x19,
+0x00, 0x00, 0x00, 0xc0, 0xf0, 0x1b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x02, 0x0b, 0xcb, 0x1c, 0x01, 0x00, 0x01,
+0x1f, 0x04, 0x01, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x0d, 0x82, 0x24, 0xa3, 0xaa, 0x00, 0x00, 0x02,
+0x02, 0x00, 0x15, 0x11, 0x00, 0x00, 0x00, 0x01, 0x19, 0x00, 0x02, 0x01, 0x06, 0x00, 0x03, 0x01,
+0x00, 0x00, 0x04, 0x01, 0x01, 0x07, 0x00, 0x0c, 0x3a, 0x80, 0x01, 0x00, 0x06, 0x1f, 0x04, 0x0f,
+0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+  };
+static const size_t fby4_kioxia_ssd_vpd_len = sizeof(fby4_kioxia_ssd_vpd);
+
 /* Yosemite4 Sentinel Dome without Retimer Boards */
 static const uint8_t fby4_sentinel_dome_board_fruid[] = {
       0x01, 0x00, 0x00, 0x01, 0x09, 0x00, 0x00, 0xf5, 0x01, 0x08, 0x19, 0xd2,
@@ -115,7 +135,6 @@ static void fby4_i2c_init(AspeedMachineState *bmc) {
   AspeedSoCState *soc = bmc->soc;
   I2CBus *i2c[16];
   I2CSlave *mux1;
-  I2CSlave *mux2;
   I2CSlave *fan_mux;
 
   for (int i = 0; i < 16; i++) {
@@ -133,8 +152,6 @@ static void fby4_i2c_init(AspeedMachineState *bmc) {
   // Yosemite4 baseboard & chassis connection
   // i2c-mux@70
   mux1 = i2c_slave_create_simple(i2c[8], TYPE_PCA9546, 0x70);
-  // i2c-mux@71
-  mux2 = i2c_slave_create_simple(i2c[9], TYPE_PCA9546, 0x71);
 
   // Yosemite4 fanboard connection
   fan_mux = i2c_slave_create_simple(i2c[14], TYPE_PCA9546, 0x74);
@@ -147,10 +164,15 @@ static void fby4_i2c_init(AspeedMachineState *bmc) {
   const uint8_t board_addr = 0x51;
   const uint8_t chassis_addr = 0x54;
   const uint8_t bmc_storage_module_addr=0x54;
+  const uint8_t kioxia_ssd_vpd_7bit_addr = 0x51;
 
   // Yosemite4 BMC storage module
   at24c_eeprom_init_rom(i2c[11], bmc_storage_module_addr, 128 * KiB,
-                        fby4_bmc_storage_module, fby4_bmc_storage_module_len);
+                       fby4_bmc_storage_module, fby4_bmc_storage_module_len);
+
+  // kioxia ssd
+  at24c_eeprom_init_rom(i2c[14], kioxia_ssd_vpd_7bit_addr, 128 * KiB,
+                        fby4_kioxia_ssd_vpd, fby4_kioxia_ssd_vpd_len);
 
   // Yosemite4 Enclosure Chassis
   // i2c-mux@70 imux16
@@ -175,22 +197,7 @@ static void fby4_i2c_init(AspeedMachineState *bmc) {
   at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 3), board_addr, 128 * KiB,
                         fby4_sentinel_dome_board_fruid,
                         fby4_sentinel_dome_board_fruid_len);
-  // i2c-mux@71 imux20 eeprom 0x51
-  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 0), board_addr, 128 * KiB,
-                        fby4_sentinel_dome_board_fruid,
-                        fby4_sentinel_dome_board_fruid_len);
-  // i2c-mux@71 imux21 eeprom 0x51
-  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 1), board_addr, 128 * KiB,
-                        fby4_sentinel_dome_board_fruid,
-                        fby4_sentinel_dome_board_fruid_len);
-  // i2c-mux@71 imux22 eeprom 0x51
-  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 2), board_addr, 128 * KiB,
-                        fby4_sentinel_dome_board_fruid,
-                        fby4_sentinel_dome_board_fruid_len);
-  // i2c-mux@71 imux23 eeprom 0x51
-  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 3), board_addr, 128 * KiB,
-                        fby4_sentinel_dome_board_fruid,
-                        fby4_sentinel_dome_board_fruid_len);
+
 
   // Yosemite4 Blade Chassis
   // i2c-mux@70 imux16 eeprom 0x54
@@ -209,22 +216,8 @@ static void fby4_i2c_init(AspeedMachineState *bmc) {
   at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux1, 3), chassis_addr, 128 * KiB,
                         fby4_sentinel_dome_chassis_fruid,
                         fby4_sentinel_dome_chassis_fruid_len);
-  // i2c-mux@70 imux20 eeprom 0x54
-  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 0), chassis_addr, 128 * KiB,
-                        fby4_sentinel_dome_chassis_fruid,
-                        fby4_sentinel_dome_chassis_fruid_len);
-  // i2c-mux@70 imux21 eeprom 0x54
-  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 1), chassis_addr, 128 * KiB,
-                        fby4_sentinel_dome_chassis_fruid,
-                        fby4_sentinel_dome_chassis_fruid_len);
-  // i2c-mux@70 imux22 eeprom 0x54
-  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 2), chassis_addr, 128 * KiB,
-                        fby4_sentinel_dome_chassis_fruid,
-                        fby4_sentinel_dome_chassis_fruid_len);
-  // i2c-mux@70 imux23 eeprom 0x54
-  at24c_eeprom_init_rom(pca954x_i2c_get_bus(mux2, 3), chassis_addr, 128 * KiB,
-                        fby4_sentinel_dome_chassis_fruid,
-                        fby4_sentinel_dome_chassis_fruid_len);
+
+
 
   // Fanboards
   at24c_eeprom_init_rom(pca954x_i2c_get_bus(fan_mux, 0), 0x52, 128 * KiB,
